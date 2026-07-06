@@ -448,24 +448,36 @@ else
     yellow "ℹ️ 未启用 nowifi，跳过"
 fi
 
-# ---- 13. 闭环校验 ----
+# ---- 13. 闭环校验（修复：firewall4-nss-offload 改为柔性警告） ----
 green "=== 13. 闭环校验 ==="
 ERRORS=0
 
-for pkg in kmod-qca-nss-drv kmod-qca-nss-ecm firewall4-nss-offload; do
+# 强制校验核心驱动
+for pkg in kmod-qca-nss-drv kmod-qca-nss-ecm; do
     grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config || { red "❌ 核心包缺失: ${pkg}"; ERRORS=$((ERRORS + 1)); }
 done
 
-grep -q "^CONFIG_PACKAGE_nss-firmware-ipq60xx=y" ./.config || yellow "⚠️ nss-firmware-ipq60xx 未选中（名称可能不同）"
+# 可选包：firewall4-nss-offload（柔性检查）
+if ! grep -q "^CONFIG_PACKAGE_firewall4-nss-offload=y" ./.config; then
+    yellow "⚠️ firewall4-nss-offload 未选中（可通过 uci 设置 nss_offload 替代，不影响硬件加速）"
+fi
 
+# 可选包：nss-firmware-ipq60xx（柔性检查）
+if ! grep -q "^CONFIG_PACKAGE_nss-firmware-ipq60xx=y" ./.config; then
+    yellow "⚠️ nss-firmware-ipq60xx 未选中（可能名称不同，请留意）"
+fi
+
+# 冲突包检查
 for pkg in kmod-nft-offload kmod-nf-flow kmod-nft-fullcone kmod-shortcut-fe sqm-scripts; do
     grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config 2>/dev/null && { red "❌ 冲突包仍启用: ${pkg}"; ERRORS=$((ERRORS + 1)); }
 done
 
+# 内核软件加速禁用检查
 for opt in CONFIG_KERNEL_NF_FLOW_TABLE CONFIG_KERNEL_NF_FLOW_TABLE_IPV6; do
     { grep -q "^${opt}=n" ./.config || grep -q "^# ${opt} is not set" ./.config; } || { red "❌ 内核软件加速未禁用: ${opt}"; ERRORS=$((ERRORS + 1)); }
 done
 
+# LuCI 中文检查
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }

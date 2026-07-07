@@ -26,6 +26,13 @@ disable_pkg() {
         echo "CONFIG_PACKAGE_${pkg}=n" >> ./.config
     done
 }
+force_disable_pkg() {
+    for pkg in "$@"; do
+        sed -i "/^CONFIG_PACKAGE_${pkg}=/d" ./.config
+        sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" ./.config
+        echo "# CONFIG_PACKAGE_${pkg} is not set" >> ./.config
+    done
+}
 set_config() {
     local key="$1" value="$2"
     if grep -q "^${key}=" ./.config; then
@@ -79,6 +86,9 @@ green "✅ 平台匹配"
 # ---- 3. 用户定制包（LibWrt 未包含） ----
 green "=== 3. 用户定制包 ==="
 
+# 强制禁用 PCI 无线（被依赖拉回，需显式禁用）
+force_disable_pkg kmod-ath11k-pci
+
 # IPTV 组件（LibWrt 默认不含）
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 
@@ -93,7 +103,7 @@ set_pkg luci-app-nss 2>/dev/null || true
 
 # ---- 3.5 禁用 SQM 队列（关键：与 NSS 硬件加速冲突） ----
 green "=== 3.5 禁用 SQM 队列 ==="
-# 显式禁用 SQM 相关包（LibWrt feeds 中包含 sqm_scripts_nss）[reference:8]
+# 显式禁用 SQM 相关包（LibWrt feeds 中包含 sqm_scripts_nss）[reference:3]
 disable_pkg sqm-scripts luci-app-sqm sqm-scripts-nss
 set_config "CONFIG_PACKAGE_sqm-scripts-nss" "n"
 

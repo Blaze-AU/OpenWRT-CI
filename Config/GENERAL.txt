@@ -1,4 +1,4 @@
-# ==================== 新增插件 ====================
+# ==================== 新增插件（用户定制） ====================
 CONFIG_PACKAGE_luci-app-autoreboot=y
 CONFIG_PACKAGE_luci-app-upnp=y
 CONFIG_PACKAGE_miniupnpd-nftables=y
@@ -39,7 +39,6 @@ CONFIG_PACKAGE_curl=y
 # ==================== ZeroTier 依赖库 ====================
 CONFIG_PACKAGE_jq=y
 CONFIG_PACKAGE_xz=y
-# CONFIG_PACKAGE_uclibcxx is not set
 CONFIG_PACKAGE_libstdcpp=y
 
 # ==================== 调试监控工具 ====================
@@ -52,63 +51,26 @@ CONFIG_PACKAGE_kmod-lib-lz4=y
 CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y
 CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
 
-# ==================== NSS 硬件流量队列（关闭 = 游戏低延迟） ====================
-CONFIG_PACKAGE_sqm-scripts-nss=n
-
-# ==================== 内核调度：自愿抢占（家用游戏低延迟最优） ====================
-# CONFIG_KERNEL_PREEMPT_NONE is not set
-CONFIG_KERNEL_PREEMPT_VOLUNTARY=y
-# CONFIG_KERNEL_PREEMPT is not set
-# CONFIG_KERNEL_PREEMPT_RT is not set
-
-# ==================== NSS 硬件加速核心 ====================
-# 注意：kmod-qca-nss-ecm-standard 在源码中不存在，已禁用
-CONFIG_PACKAGE_kmod-qca-nss-ecm=y
-# CONFIG_PACKAGE_kmod-qca-nss-ecm-standard is not set
-CONFIG_PACKAGE_kmod-qca-nss-drv=y
-CONFIG_PACKAGE_kmod-qca-nss-dp=y
-CONFIG_PACKAGE_kmod-qca-nss-crypto=y
-CONFIG_PACKAGE_kmod-qca-ssdk=y
-CONFIG_PACKAGE_kmod-nss-ifb=y
-
-# ==================== NSS 硬件卸载管理器 ====================
-CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
-CONFIG_PACKAGE_kmod-qca-nss-drv-bridge-mgr=y
-CONFIG_PACKAGE_kmod-qca-nss-drv-vlan-mgr=y
-
-# ==================== PPPoE 拨号（显式启用） ====================
-CONFIG_PACKAGE_kmod-ppp=y
-CONFIG_PACKAGE_kmod-pppoe=y
-CONFIG_PACKAGE_kmod-pppox=y
-CONFIG_PACKAGE_ppp=y
-CONFIG_PACKAGE_ppp-mod-pppoe=y
-
-# ==================== 无线驱动（ath11k） ====================
-CONFIG_PACKAGE_ath11k-firmware-ipq6018=y
-# CONFIG_PACKAGE_ath11k-firmware-qcn9074 is not set  # IPQ60XX 不需要 PCIe 固件
-CONFIG_PACKAGE_wpad-openssl=y
-# CONFIG_PACKAGE_wpad-basic is not set
-# CONFIG_PACKAGE_wpad-mesh is not set
-# CONFIG_PACKAGE_kmod-nft-fullcone is not set
-# CONFIG_PACKAGE_kmod-ath11k-pci is not set
-
-
-# ==================== 硬件卸载（与 NSS ECM 冲突） ====================
-CONFIG_PACKAGE_kmod-nft-offload=n
-CONFIG_PACKAGE_kmod-nf-flow=n
-
-# ==================== Mesh（与 ath11k 冲突） ====================
-CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=n
-
-# ==================== 测试工具 ====================
-CONFIG_PACKAGE_kmod-net-selftests=n
-
 # ==================== IPv6 DHCP ====================
 CONFIG_PACKAGE_odhcpd=y
 CONFIG_PACKAGE_odhcpd-ipv6only=n
 
-# ==================== 其他必要组件 ====================
-CONFIG_PACKAGE_dnsmasq-full=y
-CONFIG_PACKAGE_firewall4=y
-CONFIG_PACKAGE_nftables-json=y
-CONFIG_PACKAGE_wifi-scripts=y
+# ==================== 禁用 SQM（与 NSS 硬件加速冲突） ====================
+CONFIG_PACKAGE_sqm-scripts-nss=n
+
+# ==================== 内核调度：自愿抢占（游戏低延迟） ====================
+CONFIG_KERNEL_PREEMPT_VOLUNTARY=y
+
+# ==================== 无线/全锥禁用（注释方式对抗 select） ====================
+# CONFIG_PACKAGE_kmod-nft-fullcone is not set
+# CONFIG_PACKAGE_kmod-ath11k-pci is not set
+
+# ==================== 软件流表禁用（与 NSS 硬件加速冲突） ====================
+CONFIG_PACKAGE_kmod-nft-offload=n
+CONFIG_PACKAGE_kmod-nf-flow=n
+
+# ==================== Mesh 禁用 ====================
+CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=n
+
+# ==================== 测试工具禁用 ====================
+CONFIG_PACKAGE_kmod-net-selftests=n

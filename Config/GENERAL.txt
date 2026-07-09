@@ -65,8 +65,8 @@ CONFIG_PACKAGE_sqm-scripts-nss=n
 # ==================== 内核调度：自愿抢占（游戏低延迟） ====================
 CONFIG_KERNEL_PREEMPT_VOLUNTARY=y
 
-# ==================== 无线/全锥禁用（注释方式对抗 select） ====================
-# CONFIG_PACKAGE_kmod-nft-fullcone is not set
+# ==================== Wi-Fi 驱动（AHB 总线） ====================
+CONFIG_PACKAGE_kmod-ath11k-ahb=y
 # CONFIG_PACKAGE_kmod-ath11k-pci is not set
 
 # ==================== 软件流表禁用（与 NSS 硬件加速冲突） ====================

@@ -58,6 +58,7 @@ CONFIG_PACKAGE_odhcpd-ipv6only=n
 # ==================== AdGuardHome 去广告 DNS ====================
 CONFIG_PACKAGE_luci-app-adguardhome=y
 CONFIG_PACKAGE_adguardhome=n
+CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y
 
 # ==================== 禁用 SQM（与 NSS 硬件加速冲突） ====================
 CONFIG_PACKAGE_sqm-scripts-nss=n
@@ -78,3 +79,9 @@ CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=n
 
 # ==================== 测试工具禁用 ====================
 CONFIG_PACKAGE_kmod-net-selftests=n
+
+# ==================== 补充优化 ====================
+# 强制禁用网桥 netfilter（避免干扰 NSS 桥接卸载）
+# CONFIG_PACKAGE_kmod-br-netfilter is not set
+
+

@@ -13,13 +13,6 @@ yellow() { echo -e "\033[33m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 export SOURCE_DATE_EPOCH=0
 
-# ===================== 环境变量默认值 =====================
-WRT_THEME=${WRT_THEME:-"aurora"}
-WRT_IP=${WRT_IP:-"192.168.10.1"}
-WRT_NAME=${WRT_NAME:-"OpenWrt"}
-WRT_SSID=${WRT_SSID:-"OpenWrt"}
-WRT_WORD=${WRT_WORD:-"11111111"}
-WRT_CONFIG=${WRT_CONFIG:-""}
 
 # ===================== 工具函数 =====================
 set_pkg() {
@@ -99,8 +92,7 @@ force_disable_pkg kmod-ath11k-pci
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 set_pkg luci-app-adguardhome
-disable_pkg adguardhome
-
+force_disable_pkg adguardhome   # ✅ 修复1：使用 force_disable_pkg
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 set_pkg luci-app-nss 2>/dev/null || true
 
@@ -138,6 +130,9 @@ green "✅ 用户定制包配置完成"
 green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
+
+# ✅ 修复2：defconfig 之后再次强制禁用 adguardhome
+force_disable_pkg adguardhome
 
 # ---- 6. uci-defaults 系统配置 ----
 green "=== 6. 系统默认配置 ==="
@@ -350,7 +345,7 @@ else
     yellow "ℹ️ 未启用 nowifi，跳过"
 fi
 
-# ---- 10. 校验（不含 AdGuardHome，因已在第 3 步配置） ----
+# ---- 10. 校验 ----
 green "=== 10. 校验 ==="
 ERRORS=0
 
@@ -367,7 +362,7 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
-# 检查 adguardhome 核心是否被禁用
+# 检查 adguardhome 核心是否被禁用（现在应为注释状态）
 if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
     red "❌ adguardhome 核心包仍启用（与预置核心冲突）"
     ERRORS=$((ERRORS + 1))
@@ -381,10 +376,10 @@ fi
 
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
-# ---- 11. 预置 AdGuardHome 核心（修正版：文件而非目录） ----
+# ---- 11. 预置 AdGuardHome 核心 ----
 green "=== 11. 下载 AdGuardHome 核心 ==="
 
-# ⚠️ 关键修正：只创建父目录，不创建 AdGuardHome 目录
+# 只创建父目录，不创建 AdGuardHome 目录
 mkdir -p files/usr/bin
 
 ARCH="arm64"

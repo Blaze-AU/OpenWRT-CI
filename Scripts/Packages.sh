@@ -42,6 +42,8 @@ UPDATE_PACKAGE() {
 	fi
 }
 
+# 添加额外插件
+git clone --depth=1 https://github.com/kongfl888/luci-app-adguardhome package/luci-app-adguardhome
 # ===================== 拉取全套前端主题 =====================
 UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
 UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"

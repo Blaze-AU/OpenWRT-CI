@@ -92,7 +92,7 @@ force_disable_pkg kmod-ath11k-pci
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 set_pkg luci-app-adguardhome
-force_disable_pkg adguardhome   # ✅ 修复1：使用 force_disable_pkg
+force_disable_pkg adguardhome   # 强制禁用核心包
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 set_pkg luci-app-nss 2>/dev/null || true
 
@@ -106,8 +106,7 @@ sed -i '/^CONFIG_KERNEL_PREEMPT_/d' ./.config
 set_config "CONFIG_KERNEL_PREEMPT_VOLUNTARY" "y"
 set_config "CONFIG_KERNEL_PREEMPT_NONE" "n"
 set_config "CONFIG_KERNEL_PREEMPT" "n"
-# ---- adguardhome 中文语言包 ----
-echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> ./.config
+
 # ---- 禁用软件流表 ----
 disable_pkg kmod-nft-offload kmod-nf-flow
 
@@ -132,7 +131,7 @@ green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
 
-# ✅ 修复2：defconfig 之后再次强制禁用 adguardhome
+# ✅ defconfig 之后再次强制禁用 adguardhome
 force_disable_pkg adguardhome
 
 # ---- 6. uci-defaults 系统配置 ----
@@ -363,7 +362,7 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
-# 检查 adguardhome 核心是否被禁用（现在应为注释状态）
+# 检查 adguardhome 核心是否被禁用（应为注释状态）
 if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
     red "❌ adguardhome 核心包仍启用（与预置核心冲突）"
     ERRORS=$((ERRORS + 1))
@@ -414,4 +413,5 @@ green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
+green "  ✅ 预置 AdGuardHome 最新核心，禁用核心包编译"
 green "========================================="

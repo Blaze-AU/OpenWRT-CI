@@ -41,17 +41,21 @@ UPDATE_PACKAGE() {
 }
 
 # ===================== 拉取 AdGuardHome（先删除旧版，再拉取最新版） =====================
-echo "=== 拉取 AdGuardHome 插件 ==="
+echo "=== 拉取 AdGuardHome 插件（最新版） ==="
 
 # 1. 删除可能存在的旧目录
 if [ -d "package/luci-app-adguardhome" ]; then
     rm -rf package/luci-app-adguardhome
     echo "✅ 已删除旧版 AdGuardHome 目录"
 fi
+# 同时清理可能残留的语言包目录（如有）
+if [ -d "package/luci-i18n-adguardhome-zh-cn" ]; then
+    rm -rf package/luci-i18n-adguardhome-zh-cn
+    echo "✅ 已删除多余语言包目录"
+fi
 
-# 2. 克隆最新版（若需要固定版本，取消注释下一行并注释掉紧跟的克隆命令）
-# git clone --depth=1 --branch v1.8-20221120 https://github.com/kongfl888/luci-app-adguardhome package/luci-app-adguardhome
-git clone --depth=1 https://github.com/kongfl888/luci-app-adguardhome package/luci-app-adguardhome || {
+# 2. 克隆最新版主仓库（默认分支，即最新 commit）
+git clone --depth=1 https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome || {
     echo "❌ 克隆 AdGuardHome 失败，请检查网络"
     exit 1
 }
@@ -68,9 +72,13 @@ else
     echo "⚠️ 未找到 Makefile，可能克隆失败或目录结构变更"
 fi
 
-# ===================== 拉取主题（仅保留您需要的 aurora，其余注释） =====================
+# 4. 提示中文已内置（删除多余的 .config 检查，因为此插件已自带中文）
+echo "✅ 该插件已内置完整中文翻译，无需额外语言包"
+
+# ===================== 拉取主题（仅保留您需要的 aurora 和 argon） =====================
 echo "=== 拉取主题 ==="
-# UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
+# Argon 主题（开启注释，因为您之前 .config 中有启用）
+UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
 # UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"
 UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"
 UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
@@ -80,14 +88,6 @@ UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
 # ===================== 拉取基础工具 =====================
 echo "=== 拉取基础工具 ==="
 UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
-
-# ===================== 提示中文语言包（如需） =====================
-echo "=== 提示：AdGuardHome 中文语言包 ==="
-if grep -q "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" "$GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt" 2>/dev/null; then
-    echo "✅ .config 中已启用 AdGuardHome 中文语言包"
-else
-    echo "⚠️ 建议在 .config 中添加 CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y 以获得中文界面"
-fi
 
 # ===================== 私有扩展 =====================
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then

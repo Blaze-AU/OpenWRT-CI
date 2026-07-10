@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# 职责：拉取外部插件和主题源码（AdGuardHome、主题、timecontrol）
+# 职责：拉取外部插件和主题源码（AdGuardHome v1.19、主题、timecontrol）
 
 # ===================== 工具函数 =====================
 UPDATE_PACKAGE() {
@@ -40,8 +40,8 @@ UPDATE_PACKAGE() {
     fi
 }
 
-# ===================== 拉取 AdGuardHome（先删除旧版，再拉取最新版） =====================
-echo "=== 拉取 AdGuardHome 插件（最新版） ==="
+# ===================== 拉取 AdGuardHome（先删除旧版，再拉取 v1.19） =====================
+echo "=== 拉取 AdGuardHome 插件（v1.19） ==="
 
 # 1. 删除可能存在的旧目录
 if [ -d "package/luci-app-adguardhome" ]; then
@@ -54,9 +54,9 @@ if [ -d "package/luci-i18n-adguardhome-zh-cn" ]; then
     echo "✅ 已删除多余语言包目录"
 fi
 
-# 2. 克隆最新版主仓库（默认分支，即最新 commit）
-git clone --depth=1 https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome || {
-    echo "❌ 克隆 AdGuardHome 失败，请检查网络"
+# 2. 克隆 v1.19 版本（指定标签）
+git clone --depth=1 --branch v1.19 https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome || {
+    echo "❌ 克隆 AdGuardHome v1.19 失败，请检查网络"
     exit 1
 }
 
@@ -72,12 +72,12 @@ else
     echo "⚠️ 未找到 Makefile，可能克隆失败或目录结构变更"
 fi
 
-# 4. 提示中文已内置（删除多余的 .config 检查，因为此插件已自带中文）
-echo "✅ 该插件已内置完整中文翻译，无需额外语言包"
+# 4. 提示中文已内置
+echo "✅ 该插件 v1.19 已内置完整中文翻译，无需额外语言包"
 
-# ===================== 拉取主题（仅保留您需要的 aurora 和 argon） =====================
+# ===================== 拉取主题 =====================
 echo "=== 拉取主题 ==="
-# Argon 主题（开启注释，因为您之前 .config 中有启用）
+# Argon 主题（如 openwrt-25.12 分支不存在，请改为 master）
 UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
 # UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"
 UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"

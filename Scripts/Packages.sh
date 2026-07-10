@@ -3,6 +3,31 @@
 # Copyright (C) 2026 VIKINGYFY
 # 职责：拉取外部插件和主题源码（AdGuardHome master、主题、timecontrol）
 
+# ===================== 自动切换到 OpenWrt 源码根目录 =====================
+find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/feeds" && -d "$dir/package" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+ROOT_DIR=$(find_root)
+if [[ -n "$ROOT_DIR" ]]; then
+    if [[ "$ROOT_DIR" != "$PWD" ]]; then
+        echo "🔁 切换到 OpenWrt 源码根目录: $ROOT_DIR"
+        cd "$ROOT_DIR" || { echo "❌ 无法切换到 $ROOT_DIR"; exit 1; }
+    fi
+else
+    echo "❌ 错误：未找到 OpenWrt 源码根目录（需包含 feeds/ 和 package/）"
+    echo "   请在 OpenWrt 源码根目录下执行此脚本。"
+    exit 1
+fi
+
 # ===================== 工具函数 =====================
 UPDATE_PACKAGE() {
     local PKG_NAME=$1
@@ -40,45 +65,41 @@ UPDATE_PACKAGE() {
     fi
 }
 
-# ===================== 拉取 AdGuardHome（先删除旧版，再拉取 master 分支） =====================
+# ===================== 拉取 AdGuardHome（master 分支） =====================
 echo "=== 拉取 AdGuardHome 插件（master 分支） ==="
 
-# 1. 删除可能存在的旧目录
+# 删除可能存在的旧目录
 if [ -d "package/luci-app-adguardhome" ]; then
     rm -rf package/luci-app-adguardhome
     echo "✅ 已删除旧版 AdGuardHome 目录"
 fi
-# 同时清理可能残留的语言包目录（如有）
 if [ -d "package/luci-i18n-adguardhome-zh-cn" ]; then
     rm -rf package/luci-i18n-adguardhome-zh-cn
     echo "✅ 已删除多余语言包目录"
 fi
 
-# 2. 克隆 master 分支（最新代码）
+# 克隆 master 分支
 git clone --depth=1 --branch master https://github.com/stevenjoezhang/luci-app-adguardhome.git package/luci-app-adguardhome || {
     echo "❌ 克隆 AdGuardHome master 分支失败，请检查网络"
     exit 1
 }
 
-# 3. 移除对 adguardhome 核心包的硬依赖（改进正则，匹配所有形式）
+# 移除核心依赖
 AGH_MAKEFILE="package/luci-app-adguardhome/Makefile"
 if [ -f "$AGH_MAKEFILE" ]; then
-    # 删除 DEPENDS 行中的 +adguardhome 及其后可能跟随的版本号/空格
     sed -i 's/+adguardhome\b[^ ]*//g' "$AGH_MAKEFILE"
-    # 清理可能留下的多余空格和逗号
     sed -i 's/, \+/ /g; s/ \+/, /g; s/,,*/,/g; s/,$//g' "$AGH_MAKEFILE"
     echo "✅ 已移除 luci-app-adguardhome 对 adguardhome 核心的依赖"
 else
     echo "⚠️ 未找到 Makefile，可能克隆失败或目录结构变更"
 fi
 
-# 4. 提示中文已内置
 echo "✅ 该插件 master 分支已内置完整中文翻译，无需额外语言包"
 
 # ===================== 拉取主题 =====================
 echo "=== 拉取主题 ==="
-# Argon 主题（如 openwrt-25.12 分支不存在，请改为 master）
-UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
+# Argon 主题（使用 master 分支，更加稳定）
+UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "master"
 # UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"
 UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"
 UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
@@ -93,5 +114,10 @@ UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
     source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
 fi
+
+# ===================== 更新 feeds =====================
+echo "=== 更新 feeds ==="
+./scripts/feeds update -a
+./scripts/feeds install -a
 
 echo "✅ diy-script.sh 执行完成"

@@ -106,10 +106,8 @@ sed -i '/^CONFIG_KERNEL_PREEMPT_/d' ./.config
 set_config "CONFIG_KERNEL_PREEMPT_VOLUNTARY" "y"
 set_config "CONFIG_KERNEL_PREEMPT_NONE" "n"
 set_config "CONFIG_KERNEL_PREEMPT" "n"
-
-# ---- adguardhome ----
-echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> ../.config
-
+# ---- adguardhome 中文语言包 ----
+echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> ./.config
 # ---- 禁用软件流表 ----
 disable_pkg kmod-nft-offload kmod-nf-flow
 

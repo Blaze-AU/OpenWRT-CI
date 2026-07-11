@@ -36,11 +36,12 @@ get_latest_release() {
 
     # 如果获取失败或为空，使用备用版本
     if [[ -z "$tag" || "$tag" == "null" ]]; then
-        yellow "⚠️ 无法获取最新 Release，使用备用版本: $fallback"
+        yellow "⚠️ 无法获取最新 Release，使用备用版本: $fallback" >&2
         tag="$fallback"
     else
-        green "✅ 获取到最新 Release: $tag"
+        green "✅ 获取到最新 Release: $tag" >&2
     fi
+    # 只输出纯版本号到 stdout（供命令替换捕获）
     echo "$tag"
 }
 

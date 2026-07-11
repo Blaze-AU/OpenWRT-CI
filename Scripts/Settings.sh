@@ -1,22 +1,28 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 - LibWrt main-nss 最终精简版
-# 仅添加 LibWrt 未包含的用户定制：IPTV、主题、NTP、热插拔
-# 已移除所有与 LibWrt 原生 NSS 配置冗余的操作
-# 架构: DSA | qualcommax/ipq60xx | 内核6.12.94+
-# ========================================
-# 修复：AdGuardHome 界面强制使用自定义仓库（stevenjoezhang），避开官方 26.188
-# ========================================
-
-set -eo pipefail
+# 独立完整脚本：拉取 AdGuardHome 自定义界面 + 预置核心 + IPQ60XX NSS 加速定制
+# 执行路径：OpenWRT 根目录（自动切换）
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 export SOURCE_DATE_EPOCH=0
 
-# ===================== 外部包管理函数（修复：创建 package/ 目录） =====================
+# ===================== 自动切换到 OpenWRT 根目录 =====================
+if [[ -f "feeds.conf.default" ]]; then
+    :
+elif [[ -f "../feeds.conf.default" ]]; then
+    cd ..
+elif [[ -f "../../feeds.conf.default" ]]; then
+    cd ../..
+else
+    echo "❌ 错误：找不到 feeds.conf.default，请确保在 OpenWRT 根目录或其子目录执行"
+    exit 1
+fi
+echo "📍 当前工作目录：$(pwd)"
+
+# ===================== 外部包管理函数 =====================
 UPDATE_PACKAGE() {
     local PKG_NAME="$1"
     local PKG_REPO="$2"
@@ -28,23 +34,19 @@ UPDATE_PACKAGE() {
 
     echo " "
 
-    # 清理 feeds 和 package 中的旧目录（包括可能的额外名称）
     for NAME in "${PKG_NAME}" "${EXTRA_NAMES[@]}"; do
         echo "Search directory: $NAME"
         find feeds/luci/ feeds/packages/ package/ -maxdepth 3 -type d -iname "*$NAME*" -exec rm -rf {} + 2>/dev/null || true
         [[ -d "$NAME" ]] && rm -rf "$NAME" && echo "Delete local directory: $NAME"
     done
 
-    # 确保 package/ 目录存在（修复克隆失败问题）
-    mkdir -p package
+    mkdir -p package 2>/dev/null || true
 
-    # 克隆到 package/ 目录
-    if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME" 2>/dev/null; then
-        echo "⚠️ 克隆 $PKG_NAME 失败，跳过"
+    if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME"; then
+        red "⚠️ 克隆 $PKG_NAME 失败，跳过"
         return 0
     fi
 
-    # 处理特殊模式（目前仅用到 name，保留扩展）
     case "$PKG_SPECIAL" in
         pkg)
             find "package/$REPO_NAME/" -maxdepth 3 -type d -iname "*$PKG_NAME*" -exec cp -rf {} package/ \; 2>/dev/null || true
@@ -53,12 +55,9 @@ UPDATE_PACKAGE() {
         name)
             mv -f "package/$REPO_NAME" "package/$PKG_NAME" 2>/dev/null || true
             ;;
-        *)
-            # 默认保留原仓库名（已位于 package/ 下）
-            ;;
     esac
 
-    echo "✅ $PKG_NAME 处理完成"
+    green "✅ $PKG_NAME 处理完成"
 }
 
 # ===================== 工具函数 =====================
@@ -94,10 +93,10 @@ set_config() {
 
 # ===================== 主流程 =====================
 green "========================================="
-green "IPQ60XX NSS 加速 - LibWrt main-nss 精简版"
+green "独立完整脚本 - IPQ60XX NSS 加速 + AdGuardHome 定制"
 green "========================================="
 
-# ---- 1. 静态源码修改 ----
+# ---- 1. 源码定制（主题、IP、WiFi 等） ----
 green "=== 1. 源码定制 ==="
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
@@ -131,11 +130,9 @@ if ! grep -q "CONFIG_TARGET_qualcommax_ipq60xx" ./.config; then
 fi
 green "✅ 平台匹配"
 
-# ---- 3. 用户定制包 ----
+# ---- 3. 用户定制包（不含 AdGuardHome，单独处理） ----
 green "=== 3. 用户定制包 ==="
-
 force_disable_pkg kmod-ath11k-pci
-
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
@@ -164,35 +161,6 @@ disable_pkg kmod-net-selftests
 
 green "✅ 用户定制包配置完成"
 
-# ========================================
-# 替换 AdGuardHome 界面为自定义版本（使用 UPDATE_PACKAGE）
-# ========================================
-green "=== 替换 AdGuardHome 界面为自定义版本 ==="
-
-# 1. 使用统一函数拉取（清理 + 克隆到 package/）
-UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master"
-
-# 2. 移除对 adguardhome 核心的依赖（避免与预置核心冲突）
-AGH_MAKEFILE="package/luci-app-adguardhome/Makefile"
-if [ -f "$AGH_MAKEFILE" ]; then
-    sed -i 's/+adguardhome\b[^ ]*//g' "$AGH_MAKEFILE"
-    sed -i 's/, \+/ /g; s/ \+/, /g; s/,,*/,/g; s/,$//g' "$AGH_MAKEFILE"
-    green "✅ 已移除 AdGuardHome 界面的核心依赖"
-else
-    yellow "⚠️ 未找到 Makefile，请检查克隆是否成功"
-fi
-
-# 3. 从 feeds 索引中彻底删除官方条目
-find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "PKG_NAME:=luci-app-adguardhome" {} \; 2>/dev/null | while read -r idx; do
-    sed -i '/^define Package\/luci-app-adguardhome/,/^endef/d' "$idx"
-    sed -i '/^PKG_NAME:=luci-app-adguardhome/d' "$idx"
-    green "✅ 已从 $idx 移除官方索引"
-done || true
-
-# 4. 强制安装到构建系统（但暂不修改 .config，因后面 defconfig 会重置）
-green "=== 安装自定义 AdGuardHome 包到 feeds ==="
-./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
-green "✅ 已安装到 feeds，稍后将在 defconfig 后强制启用"
 
 # ---- 4. 私有配置注入 ----
 [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ] && { green "📂 加载私有配置"; cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config; }
@@ -203,17 +171,16 @@ green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
 
-# ---- 强制安装 AdGuardHome（再次确保 .config 正确） ----
-green "=== 强制安装 AdGuardHome 界面并禁用核心包 ==="
+# ---- 强制启用 AdGuardHome（defconfig 后再次确保） ----
+green "=== 强制启用 AdGuardHome 界面并禁用核心包 ==="
 set_pkg luci-app-adguardhome
-force_disable_pkg adguardhome   # 确保核心包不被选中（与预置冲突）
+force_disable_pkg adguardhome
 green "✅ .config 中已强制启用 luci-app-adguardhome，禁用 adguardhome 核心"
 
-# ---- 6. uci-defaults 系统配置 ----
+# ---- 6. uci-defaults 系统配置（IPTV、NTP、防火墙等） ----
 green "=== 6. 系统默认配置 ==="
 mkdir -p ./package/base-files/files/etc/uci-defaults
 
-# 90-fstab
 cat > ./package/base-files/files/etc/uci-defaults/90-fstab << 'EOF'
 #!/bin/sh
 uci -q get fstab.global || {
@@ -230,7 +197,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/90-fstab
 
-# 91-base-config
 cat > ./package/base-files/files/etc/uci-defaults/91-base-config << EOF
 #!/bin/sh
 uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr='$WRT_IP'; uci commit network; }
@@ -247,7 +213,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/91-base-config
 
-# 92-ntp-dns
 cat > ./package/base-files/files/etc/uci-defaults/92-ntp-dns << 'EOF'
 #!/bin/sh
 uci -q set system.ntp.enabled='1'
@@ -264,7 +229,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/92-ntp-dns
 
-# 93-wifi-config
 cat > ./package/base-files/files/etc/uci-defaults/93-wifi-config << EOF
 #!/bin/sh
 for dev in \$(uci show wireless | grep '=wifi-device' | cut -d. -f2 | cut -d= -f1); do
@@ -284,7 +248,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/93-wifi-config
 
-# 94-iptv-config
 cat > ./package/base-files/files/etc/uci-defaults/94-iptv-config << 'EOF'
 #!/bin/sh
 if uci -q get network.lan.ports | grep -q 'lan3'; then
@@ -324,7 +287,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/94-iptv-config
 
-# 95-igmpproxy-config
 cat > ./package/base-files/files/etc/uci-defaults/95-igmpproxy-config << 'EOF'
 #!/bin/sh
 uci -q get igmpproxy.@igmpproxy[0] || { uci set igmpproxy.global=igmpproxy; uci set igmpproxy.global.quickleave='1'; }
@@ -342,7 +304,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/95-igmpproxy-config
 
-# 98-firewall-nss
 cat > ./package/base-files/files/etc/uci-defaults/98-firewall-nss << 'EOF'
 #!/bin/sh
 uci -q get firewall.@defaults[0] || uci add firewall defaults
@@ -357,7 +318,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/98-firewall-nss
 
-# 99-enable-user-services
 cat > ./package/base-files/files/etc/uci-defaults/99-enable-user-services << 'EOF'
 #!/bin/sh
 /etc/init.d/igmpproxy enable 2>/dev/null || true
@@ -420,7 +380,7 @@ else
     yellow "ℹ️ 未启用 nowifi，跳过"
 fi
 
-# ---- 10. 校验（精简） ----
+# ---- 10. 校验 ----
 green "=== 10. 校验 ==="
 ERRORS=0
 
@@ -445,7 +405,7 @@ fi
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
 # ---- 11. 预置 AdGuardHome 核心 ----
-green "=== 11. 下载 AdGuardHome 核心 ==="
+green "=== 11. 预置 AdGuardHome 核心 ==="
 mkdir -p files/usr/bin
 ARCH="arm64"
 AGH_CORE=$(curl -sL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | grep "/AdGuardHome_linux_${ARCH}" | awk -F '"' '{print $4}')
@@ -464,15 +424,14 @@ fi
 # ---- 完成 ----
 green ""
 green "========================================="
-green "✅ 精简优化版执行完成"
+green "✅ 独立完整脚本执行完成"
 green "========================================="
 green "核心功能："
-green "  ✅ 仅添加 LibWrt 未包含的 IPTV/用户定制"
-green "  ✅ 云浮电信 IPTV 双物理口 (LAN3)"
-green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
-green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
-green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
-green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
-green "  ✅ 预置 AdGuardHome 最新核心，用核心包编译"
-green "  ✅ AdGuardHome 界面强制使用自定义仓库（非官方 26.188）"
+green "  ✅ 拉取自定义 AdGuardHome 界面（stevenjoezhang）"
+green "  ✅ 移除核心依赖，禁用官方核心包"
+green "  ✅ 预置最新 AdGuardHome 核心二进制"
+green "  ✅ IPTV（云浮电信双物理口、策略路由）"
+green "  ✅ NTP（183.235.3.59 / 19.59）"
+green "  ✅ 禁用 SQM、启用 NSS 加速"
+green "  ✅ WiFi 默认配置、主题定制"
 green "========================================="

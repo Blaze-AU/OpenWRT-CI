@@ -170,7 +170,7 @@ done || true
 green "✅ AdGuardHome 处理完成"
 
 # ---- 更新软件包版本（仅 sing-box） ----
-UPDATE_VERSION "sing-box"
+# UPDATE_VERSION "sing-box"
 
 # ---- 私有扩展 ----
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then

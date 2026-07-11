@@ -1,8 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# 独立完整脚本：拉取 AdGuardHome 自定义界面 + 预置核心 + IPQ60XX NSS 加速定制
-# 执行路径：OpenWRT 根目录（自动切换）
+
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
@@ -22,7 +21,7 @@ else
 fi
 echo "📍 当前工作目录：$(pwd)"
 
-# ===================== 外部包管理函数 =====================
+# ===================== 外部包管理函数（保留，供其他包使用） =====================
 UPDATE_PACKAGE() {
     local PKG_NAME="$1"
     local PKG_REPO="$2"
@@ -93,7 +92,7 @@ set_config() {
 
 # ===================== 主流程 =====================
 green "========================================="
-green "独立完整脚本 - IPQ60XX NSS 加速 + AdGuardHome 定制"
+green "独立完整脚本 - IPQ60XX NSS 加速 + IPTV 定制"
 green "========================================="
 
 # ---- 1. 源码定制（主题、IP、WiFi 等） ----
@@ -130,7 +129,7 @@ if ! grep -q "CONFIG_TARGET_qualcommax_ipq60xx" ./.config; then
 fi
 green "✅ 平台匹配"
 
-# ---- 3. 用户定制包（不含 AdGuardHome，单独处理） ----
+# ---- 3. 用户定制包 ----
 green "=== 3. 用户定制包 ==="
 force_disable_pkg kmod-ath11k-pci
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
@@ -161,7 +160,6 @@ disable_pkg kmod-net-selftests
 
 green "✅ 用户定制包配置完成"
 
-
 # ---- 4. 私有配置注入 ----
 [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ] && { green "📂 加载私有配置"; cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config; }
 [ -n "$WRT_PACKAGE" ] && { green "📦 追加自定义包"; echo -e "$WRT_PACKAGE" >> ./.config; }
@@ -170,12 +168,6 @@ green "✅ 用户定制包配置完成"
 green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
-
-# ---- 强制启用 AdGuardHome（defconfig 后再次确保） ----
-green "=== 强制启用 AdGuardHome 界面并禁用核心包 ==="
-set_pkg luci-app-adguardhome
-force_disable_pkg adguardhome
-green "✅ .config 中已强制启用 luci-app-adguardhome，禁用 adguardhome 核心"
 
 # ---- 6. uci-defaults 系统配置（IPTV、NTP、防火墙等） ----
 green "=== 6. 系统默认配置 ==="
@@ -397,29 +389,7 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
-if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
-    red "❌ adguardhome 核心包仍启用（与预置核心冲突）"
-    ERRORS=$((ERRORS + 1))
-fi
-
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
-
-# ---- 11. 预置 AdGuardHome 核心 ----
-green "=== 11. 预置 AdGuardHome 核心 ==="
-mkdir -p files/usr/bin
-ARCH="arm64"
-AGH_CORE=$(curl -sL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | grep "/AdGuardHome_linux_${ARCH}" | awk -F '"' '{print $4}')
-if [ -n "$AGH_CORE" ]; then
-    if wget -qO- "$AGH_CORE" | tar -xOz --wildcards '*/AdGuardHome' > files/usr/bin/AdGuardHome 2>/dev/null; then
-        chmod +x files/usr/bin/AdGuardHome
-        green "✅ AdGuardHome 核心下载完成 (${ARCH})"
-    else
-        yellow "⚠️ 提取失败，将依赖插件自动下载"
-        rm -f files/usr/bin/AdGuardHome
-    fi
-else
-    yellow "⚠️ 未找到 ${ARCH} 架构的 AdGuardHome，跳过预置"
-fi
 
 # ---- 完成 ----
 green ""
@@ -427,9 +397,6 @@ green "========================================="
 green "✅ 独立完整脚本执行完成"
 green "========================================="
 green "核心功能："
-green "  ✅ 拉取自定义 AdGuardHome 界面（stevenjoezhang）"
-green "  ✅ 移除核心依赖，禁用官方核心包"
-green "  ✅ 预置最新 AdGuardHome 核心二进制"
 green "  ✅ IPTV（云浮电信双物理口、策略路由）"
 green "  ✅ NTP（183.235.3.59 / 19.59）"
 green "  ✅ 禁用 SQM、启用 NSS 加速"

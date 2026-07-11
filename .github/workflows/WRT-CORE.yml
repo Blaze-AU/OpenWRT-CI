@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-#云编译公用核心
 name: WRT-CORE
 
 on:
@@ -61,60 +60,80 @@ env:
 
 jobs:
   core:
-    name: ${{inputs.WRT_SOURCE}}
+    name: ${{inputs.WRT_SOURCE}} 
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Projects # 检出项目仓库（包含脚本和配置）
-        uses: actions/checkout@main
 
-      - name: Initialization Environment # 初始化编译环境（安装依赖、挂载目录）
+
+      - name: Checkout Projects 检出项目仓库（包含脚本和配置）
+        uses: actions/checkout@main
+        
+      - name: Initialization Environment 初始化编译环境
         env:
-          DEBIAN_FRONTEND: noninteractive
+          DEBIAN_FRONTEND: noninteractive   # 避免交互式提示
         run: |
+          # 移除可能冲突的软件包（如 Firefox）
           sudo -E apt -yqq purge firefox
+          # 更新软件源并升级所有包
           sudo -E apt -yqq update
           sudo -E apt -yqq full-upgrade
+          # 清理无用包和缓存
           sudo -E apt -yqq autoremove --purge
           sudo -E apt -yqq autoclean
           sudo -E apt -yqq clean
+          # 安装额外依赖：dos2unix（格式转换）、libfuse-dev（文件系统）
           sudo -E apt -yqq install dos2unix libfuse-dev
+          # 运行 ImmortalWrt 官方编译环境初始化脚本
           sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          # 重新加载 systemd 配置
           sudo -E systemctl daemon-reload
+          # 设置时区为上海（北京时间）
           sudo -E timedatectl set-timezone "Asia/Shanghai"
 
+          # 创建编译挂载目录并赋予当前用户权限
           sudo mkdir -p /mnt/build_wrt
           sudo chown $USER:$USER /mnt/build_wrt
+          # 在工作空间下创建软链接 wrt/ 指向实际编译目录
           sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
 
-      - name: Initialization Values # 初始化环境变量（时间、平台、WiFi状态等）
+      - name: Initialization Values 初始化环境变量
         run: |
+          # 生成固件日期（格式：年.月.日-时.分.秒）
           echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+          # 标记仓库所有者（用于 Release 命名）
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
+          # 固件标识（取自 WRT_SOURCE 的第一部分）
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
+          # 从配置文件中提取目标平台（如 qualcommax）
           echo "WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)" >> $GITHUB_ENV
+          # 默认 WiFi 启用状态（后续可能被覆盖）
           echo "WRT_WIFI=wifi-yes" >> $GITHUB_ENV
+          # 内核版本和插件列表初始化为 none，编译后更新
           echo "WRT_KVER=none" >> $GITHUB_ENV
           echo "WRT_LIST=none" >> $GITHUB_ENV
 
-      - name: Clone Code # 克隆 OpenWrt 源码
+      - name: Clone Code 克隆 OpenWrt 源码
         run: |
+          # 克隆指定分支的源码到 wrt/ 目录
           git clone --depth=1 --single-branch --branch $WRT_BRANCH $WRT_REPO ./wrt/
 
+          # 进入目录获取最新提交的短 hash
           cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
 
-          # GitHub Action 移除国内下载源
+          # 移除项目镜像配置中的国内源（防止因网络问题导致下载失败）
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
 
-      - name: Check Scripts # 转换脚本格式并添加执行权限
+      - name: Check Scripts 转换脚本格式并赋予执行权限
         run: |
+          # 查找所有 .txt 和 .sh 文件，转换行末并加执行权限
           find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
 
-      - name: Check Caches # 检查缓存（工具链等）
-        id: check-cache
-        if: env.WRT_TEST != 'true'
+      - name: Check Caches 检查缓存（工具链等）
+        id: check-cache 
+        if: env.WRT_TEST != 'true' 
         uses: actions/cache@main
         with:
           key: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_HASH}}
@@ -123,77 +142,85 @@ jobs:
             ./wrt/.ccache
             ./wrt/staging_dir/host*
             ./wrt/staging_dir/tool*
-
-      - name: Update Caches # 更新缓存标记（若命中则跳过工具链构建）
+            
+      - name: Update Caches 更新缓存标记（若命中则跳过工具链构建）
         if: env.WRT_TEST != 'true'
         run: |
+          # 如果 staging_dir 存在，说明有缓存
           if [ -d "./wrt/staging_dir" ]; then
+            # 查找所有 stamp 目录（不含 target 子目录），touch 其下所有文件
             find "./wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
               find "$DIR" -type f -exec touch {} +
             done
-
+            # 创建标记文件，告诉构建系统工具链已准备就绪
             mkdir -p ./wrt/tmp && echo "1" > ./wrt/tmp/.build
-
             echo "toolchain skiped done!"
           else
             echo "caches missed!"
           fi
 
+          # 若缓存未命中，删除所有匹配前缀的旧缓存
           if ${{steps.check-cache.outputs.cache-hit != 'true'}}; then
             CACHE_LIST=$(gh cache list --key "$WRT_CONFIG-$WRT_INFO" | cut -f 1)
             for CACHE_KEY in $CACHE_LIST; do
               gh cache delete $CACHE_KEY
             done
-
             echo "caches cleanup done!"
           fi
 
-      - name: Update Feeds # 更新 feeds 并安装全部软件包
+      - name: Update Feeds 更新 feeds 并安装全部软件包
         run: |
           cd ./wrt/
-
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Custom Packages # 执行自定义包脚本（Packages.sh / Handles.sh）
+      - name: Custom Packages 执行自定义包脚本
         run: |
           cd ./wrt/package/
-
           $GITHUB_WORKSPACE/Scripts/Packages.sh
           $GITHUB_WORKSPACE/Scripts/Handles.sh
 
-      - name: Custom Settings # 合并配置并执行 Settings.sh 脚本
+      - name: Pre-install AdGuardHome Core 预置 AdGuardHome 核心
+        run: |
+          cd ./wrt/
+          if [ -f "$GITHUB_WORKSPACE/Scripts/preset-adguard-core.sh" ]; then
+            $GITHUB_WORKSPACE/Scripts/preset-adguard-core.sh
+          else
+            echo "⚠️ Scripts/preset-adguard-core.sh 不存在，跳过"
+          fi
+
+      - name: Custom Settings 自定义配置 + 合并 .config
         run: |
           cd ./wrt/
 
+          # 若配置名包含 "test"，仅使用该配置；否则合并 GENERAL.txt
           if [[ "${WRT_CONFIG,,}" == *"test"* ]]; then
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
           else
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
           fi
 
+          # 执行设置脚本（可能修改 .config 或添加额外配置）
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
+          # 生成完整配置并清理旧编译产物
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
-      - name: Download Packages # 下载所需源码包
+      - name: Download Packages 下载所需源码包
         if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
-
           make download -j$(nproc)
 
-      - name: Compile Firmware # 编译固件（多核，失败则单核调试）
+      - name: Compile Firmware 编译固件
         if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
-
           make -j$(nproc) || make -j1 V=s
 
-      - name: Machine Information # 打印系统信息（CPU、磁盘）
+      - name: Machine Information 打印系统信息（用于调试）
         run: |
           cd ./wrt/
-
           echo "======================="
           lscpu | grep -E "name|Core|Thread"
           echo "======================="
@@ -202,17 +229,20 @@ jobs:
           du -h --max-depth=1
           echo "======================="
 
-      - name: Package Firmware # 打包固件，生成 release 文件
+      - name: Package Firmware 打包固件
         run: |
           cd ./wrt/ && mkdir ./upload/
 
+          # 保存当前配置到 upload 目录，方便追溯
           cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE".txt
 
           if [[ $WRT_TEST != 'true' ]]; then
+            # 从 manifest 文件中提取内核版本
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
+            # 提取所有 luci 应用和主题名称
             echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
 
-            # 新增：获取源码最后提交信息（作者、时间、内容、hash）
+            # 获取源码最后提交信息（作者、时间、内容、hash）
             COMMIT_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
             {
               echo "VERSION_INFO<<EOF"
@@ -220,8 +250,10 @@ jobs:
               echo "EOF"
             } >> $GITHUB_ENV
 
+            # 删除不需要的元数据文件
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
+            # 重命名固件文件，格式：<平台>-<标识>-<分支>-<WiFi状态>-<日期>.<扩展名>
             for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
               EXT=$(basename $FILE | cut -d '.' -f 2-)
               NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
@@ -229,12 +261,14 @@ jobs:
               mv -f $FILE ./upload/$NEW_FILE
             done
 
+            # 将剩余文件也移动到 upload（如 manifest、kernel 等）
             find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
 
+            # 清理编译产物，释放磁盘空间
             make clean -j$(nproc)
           fi
-
-      - name: Release Firmware # 发布固件到 GitHub Release
+          
+      - name: Release Firmware 发布固件到 GitHub Release
         uses: softprops/action-gh-release@master
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}

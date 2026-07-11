@@ -144,31 +144,6 @@ UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 # UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-timewol luci-app-wolplus"
 # UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
-# ---- AdGuardHome（整合到 UPDATE_PACKAGE，保留特殊后处理） ----
-green "=== 替换 AdGuardHome 界面 ==="
-# 先清理旧目录，再克隆到 package/（由 UPDATE_PACKAGE 完成）
-UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master"
-
-# 特殊处理：移除对 adguardhome 核心的依赖
-AGH_MAKEFILE="package/luci-app-adguardhome/Makefile"
-if [[ -f "$AGH_MAKEFILE" ]]; then
-    sed -i 's/+adguardhome\b//g' "$AGH_MAKEFILE"
-    green "✅ 已移除依赖"
-else
-    yellow "⚠️ Makefile 不存在，跳过依赖移除"
-fi
-
-# 清理 feeds 索引中的官方条目
-find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "PKG_NAME:=luci-app-adguardhome" {} \; 2>/dev/null | while read -r idx; do
-    sed -i '/^define Package\/luci-app-adguardhome/,/^endef/d' "$idx"
-    sed -i '/^PKG_NAME:=luci-app-adguardhome/d' "$idx"
-    green "✅ 已清理索引：$idx"
-done || true
-
-# 强制安装自定义包
-./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
-green "✅ AdGuardHome 处理完成"
-
 # ---- 更新软件包版本（仅 sing-box） ----
 # UPDATE_VERSION "sing-box"
 

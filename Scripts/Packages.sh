@@ -39,9 +39,11 @@ UPDATE_PACKAGE() {
 
     echo " "
 
+    # 删除 feeds 中可能存在的同名包（避免冲突）
     for NAME in "${PKG_LIST[@]}"; do
         echo "Search directory: $NAME"
-        local FOUND_DIRS=$(find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
+        # 注意：路径改为 ./feeds/（因为已位于根目录）
+        local FOUND_DIRS=$(find ./feeds/luci/ ./feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
         if [ -n "$FOUND_DIRS" ]; then
             while read -r DIR; do
                 rm -rf "$DIR"
@@ -52,16 +54,17 @@ UPDATE_PACKAGE() {
         fi
     done
 
-    git clone --depth=1 --single-branch --branch $PKG_BRANCH "https://github.com/$PKG_REPO.git" || {
-        echo "错误：克隆 $PKG_REPO 失败"
+    # 克隆到 package/ 下，使用原始仓库名
+    git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME" || {
+        echo "错误：克隆 $PKG_REPO 分支 $PKG_BRANCH 失败"
         return 1
     }
 
     if [[ "$PKG_SPECIAL" == "pkg" ]]; then
-        find ./$REPO_NAME/*/ -maxdepth 3 -type d -iname "*$PKG_NAME*" -prune -exec cp -rf {} ./ \;
-        rm -rf ./$REPO_NAME/
+        find package/$REPO_NAME/*/ -maxdepth 3 -type d -iname "*$PKG_NAME*" -prune -exec cp -rf {} ./package/ \;
+        rm -rf package/$REPO_NAME/
     elif [[ "$PKG_SPECIAL" == "name" ]]; then
-        mv -f $REPO_NAME $PKG_NAME
+        mv -f package/$REPO_NAME package/$PKG_NAME
     fi
 }
 
@@ -98,8 +101,8 @@ echo "✅ 该插件 master 分支已内置完整中文翻译，无需额外语�
 
 # ===================== 拉取主题 =====================
 echo "=== 拉取主题 ==="
-# Argon 主题（使用 master 分支，更加稳定）
-UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
+# Argon 主题（分支保持 openwrt-25.12，按你的要求不改）
+# UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
 # UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"
 UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"
 UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
@@ -114,6 +117,5 @@ UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
     source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
 fi
-
 
 echo "✅ diy-script.sh 执行完成"

@@ -92,7 +92,7 @@ UPDATE_VERSION() {
 # 主执行区
 # ========================================
 
-# 1. 拉取 AdGuardHome（特殊处理：移除核心依赖 + 强制链接到 feeds）
+# 1. 拉取 AdGuardHome（强制使用 stevenjoezhang 仓库，移除核心依赖，彻底排除官方）
 echo "=== 拉取 AdGuardHome ==="
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master" "" "luci-i18n-adguardhome-zh-cn"
 
@@ -106,14 +106,13 @@ else
     echo "⚠️ 未找到 Makefile，可能克隆失败或目录结构变更"
 fi
 
-# 关键步骤：删除 feeds 中的官方版本，并创建软链接指向 package/ 中的版本
-# 这样编译时就会使用我们拉取的 master 分支，而不会被 feeds 更新覆盖
+# 强制删除 feeds 中的官方版本，并创建软链接指向 package/ 中的自定义版本
 if [ -d "feeds/luci/applications/luci-app-adguardhome" ]; then
     rm -rf feeds/luci/applications/luci-app-adguardhome
     echo "✅ 已删除 feeds 中的官方 AdGuardHome 目录"
 fi
 ln -sf ../../package/luci-app-adguardhome feeds/luci/applications/
-echo "✅ 已创建软链接，编译时将使用 package/ 中的 AdGuardHome 版本"
+echo "✅ 已创建软链接，编译时将使用 package/ 中的 AdGuardHome（非官方）"
 echo ""
 
 

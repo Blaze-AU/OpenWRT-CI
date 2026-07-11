@@ -92,9 +92,10 @@ UPDATE_VERSION() {
 # 主执行区
 # ========================================
 
-# 1. 拉取 AdGuardHome（特殊处理：移除核心依赖）
+# 1. 拉取 AdGuardHome（特殊处理：移除核心依赖 + 强制链接到 feeds）
 echo "=== 拉取 AdGuardHome ==="
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master" "" "luci-i18n-adguardhome-zh-cn"
+
 # 修改 Makefile，移除对 adguardhome 核心的依赖
 AGH_MAKEFILE="package/luci-app-adguardhome/Makefile"
 if [ -f "$AGH_MAKEFILE" ]; then
@@ -104,10 +105,19 @@ if [ -f "$AGH_MAKEFILE" ]; then
 else
     echo "⚠️ 未找到 Makefile，可能克隆失败或目录结构变更"
 fi
+
+# 关键步骤：删除 feeds 中的官方版本，并创建软链接指向 package/ 中的版本
+# 这样编译时就会使用我们拉取的 master 分支，而不会被 feeds 更新覆盖
+if [ -d "feeds/luci/applications/luci-app-adguardhome" ]; then
+    rm -rf feeds/luci/applications/luci-app-adguardhome
+    echo "✅ 已删除 feeds 中的官方 AdGuardHome 目录"
+fi
+ln -sf ../../package/luci-app-adguardhome feeds/luci/applications/
+echo "✅ 已创建软链接，编译时将使用 package/ 中的 AdGuardHome 版本"
 echo ""
 
 
-# 2. 拉取主题
+# 2. 拉取主题（按字母顺序）
 echo "=== 拉取主题 ==="
 UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
 UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"

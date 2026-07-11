@@ -16,7 +16,7 @@ yellow() { echo -e "\033[33m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 export SOURCE_DATE_EPOCH=0
 
-# ===================== 外部包管理函数（参考上一版） =====================
+# ===================== 外部包管理函数（修复：创建 package/ 目录） =====================
 UPDATE_PACKAGE() {
     local PKG_NAME="$1"
     local PKG_REPO="$2"
@@ -34,6 +34,9 @@ UPDATE_PACKAGE() {
         find feeds/luci/ feeds/packages/ package/ -maxdepth 3 -type d -iname "*$NAME*" -exec rm -rf {} + 2>/dev/null || true
         [[ -d "$NAME" ]] && rm -rf "$NAME" && echo "Delete local directory: $NAME"
     done
+
+    # 确保 package/ 目录存在（修复克隆失败问题）
+    mkdir -p package
 
     # 克隆到 package/ 目录
     if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME" 2>/dev/null; then
@@ -163,7 +166,6 @@ green "✅ 用户定制包配置完成"
 
 # ========================================
 # 替换 AdGuardHome 界面为自定义版本（使用 UPDATE_PACKAGE）
-# 注意：此处仅拉取和修改，不设置 .config，待 defconfig 后再强制启用
 # ========================================
 green "=== 替换 AdGuardHome 界面为自定义版本 ==="
 

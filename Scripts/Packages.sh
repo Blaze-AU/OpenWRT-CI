@@ -129,8 +129,6 @@ update_package "argon"   "sbwml/luci-theme-argon"      "openwrt-25.12" "name"
 update_package "shadcn"  "eamonxg/luci-theme-shadcn"  "main"        "name"
 update_package "aurora"  "eamonxg/luci-theme-aurora"  "master"      "name"
 update_package "aurora-config" "eamonxg/luci-app-aurora-config" "master" "name"
-update_package "kucat"   "sirpdboy/luci-theme-kucat"  "master"      "name"
-update_package "kucat-config" "sirpdboy/luci-app-kucat-config" "master" "name"
 
 # ---- 拉取工具 ----
 update_package "timecontrol" "sirpdboy/luci-app-timecontrol" "main"

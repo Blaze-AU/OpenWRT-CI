@@ -4,7 +4,8 @@
 # 独立 AdGuardHome 安装脚本：自定义界面 + 预置核心 + 修复版本号
 # 用法：在 OpenWRT 根目录或其子目录执行
 
-set -euo pipefail
+# 不使用 set -e，所有错误通过条件判断和显式 exit 处理
+# set -euo pipefail   # 已禁用
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
@@ -39,15 +40,18 @@ UPDATE_PACKAGE() {
     for NAME in "${PKG_NAME}" "${EXTRA_NAMES[@]}"; do
         echo "Search directory: $NAME"
         find feeds/luci/ feeds/packages/ package/ -maxdepth 3 -type d -iname "*$NAME*" -exec rm -rf {} + 2>/dev/null || true
-        [[ -d "$NAME" ]] && rm -rf "$NAME" && echo "Delete local directory: $NAME"
+        if [[ -d "$NAME" ]]; then
+            rm -rf "$NAME" && echo "Delete local directory: $NAME"
+        fi
     done
 
     mkdir -p package 2>/dev/null || true
 
-    # 克隆到 package/
+    # 克隆到 package/（若失败则显式退出）
+    echo "正在克隆 $PKG_NAME (https://github.com/$PKG_REPO.git 分支 $PKG_BRANCH) 到 package/$REPO_NAME ..."
     if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME"; then
-        red "⚠️ 克隆 $PKG_NAME 失败，跳过"
-        return 0
+        red "❌ 克隆 $PKG_NAME 失败，请检查网络或仓库地址"
+        return 1
     fi
 
     case "$PKG_SPECIAL" in
@@ -61,6 +65,7 @@ UPDATE_PACKAGE() {
     esac
 
     green "✅ $PKG_NAME 处理完成"
+    return 0
 }
 
 set_pkg() {
@@ -83,9 +88,12 @@ green "========================================="
 green "独立 AdGuardHome 安装脚本（修复版本号）"
 green "========================================="
 
-# 1. 拉取自定义界面（先删除旧目录）
+# 1. 拉取自定义界面（若失败则退出）
 green "=== 1. 拉取自定义 AdGuardHome 界面 ==="
-UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master"
+if ! UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master"; then
+    red "❌ AdGuardHome 界面拉取失败，终止安装"
+    exit 1
+fi
 
 # 2. 移除对 adguardhome 核心的依赖，并修正版本号（避免 APK 构建失败）
 green "=== 2. 移除核心依赖并修正版本号 ==="
@@ -97,12 +105,15 @@ if [ -f "$AGH_MAKEFILE" ]; then
     
     # 修正版本号：确保 PKG_VERSION 仅为数字和点，移除短横线及后缀
     # 例如 1.8-20221120-r1 -> 1.8
-    sed -i 's/PKG_VERSION:=.*/PKG_VERSION:=1.8/g' "$AGH_MAKEFILE"
-    # 如果存在 PKG_RELEASE，设置为 1 或删除
+    if grep -q '^PKG_VERSION:=' "$AGH_MAKEFILE"; then
+        sed -i 's/PKG_VERSION:=.*/PKG_VERSION:=1.8/g' "$AGH_MAKEFILE"
+    else
+        echo "PKG_VERSION:=1.8" >> "$AGH_MAKEFILE"
+    fi
+    # 设置 PKG_RELEASE 为 1
     if grep -q '^PKG_RELEASE:=' "$AGH_MAKEFILE"; then
         sed -i 's/PKG_RELEASE:=.*/PKG_RELEASE:=1/g' "$AGH_MAKEFILE"
     else
-        # 如果没有，添加一行
         echo "PKG_RELEASE:=1" >> "$AGH_MAKEFILE"
     fi
     green "✅ 已移除核心依赖并修正版本号为 1.8-1"
@@ -120,8 +131,11 @@ done || true
 
 # 4. 安装到 feeds
 green "=== 4. 安装到 feeds ==="
-./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
-green "✅ 已安装到 feeds"
+if ! ./scripts/feeds install luci-app-adguardhome 2>/dev/null; then
+    yellow "⚠️ feeds install 失败，但可能不影响编译"
+else
+    green "✅ 已安装到 feeds"
+fi
 
 # 5. 确保 .config 中启用界面并禁用核心（先执行一次，defconfig 后会重置，后面再次执行）
 green "=== 5. 预配置 .config ==="
@@ -153,7 +167,7 @@ else
     set_pkg luci-app-adguardhome
 fi
 
-# 9. 预置 AdGuardHome 核心二进制
+# 9. 预置 AdGuardHome 核心二进制（arm64）
 green "=== 9. 预置 AdGuardHome 核心 ==="
 mkdir -p files/usr/bin
 ARCH="arm64"
@@ -181,3 +195,4 @@ green "  ✅ 版本号已修正为 1.8-1（符合 APK 要求）"
 green "  ✅ .config 已强制启用界面、禁用核心"
 green "  ✅ 核心二进制已预置到 files/usr/bin"
 green "========================================="
+exit 0

@@ -5,6 +5,9 @@
 # 仅添加 LibWrt 未包含的用户定制：IPTV、主题、NTP、热插拔
 # 已移除所有与 LibWrt 原生 NSS 配置冗余的操作
 # 架构: DSA | qualcommax/ipq60xx | 内核6.12.94+
+# ========================================
+# 修复：AdGuardHome 界面强制使用自定义仓库（stevenjoezhang），避开官方 26.188
+# ========================================
 
 set -eo pipefail
 
@@ -121,6 +124,37 @@ disable_pkg kmod-qca-nss-drv-wifi-meshmgr
 disable_pkg kmod-net-selftests
 
 green "✅ 用户定制包配置完成"
+
+# ========================================
+# 替换 AdGuardHome 界面为自定义版本
+# ========================================
+green "=== 替换 AdGuardHome 界面为自定义版本 ==="
+# 删除所有可能存在的官方或自定义目录
+rm -rf feeds/luci/applications/luci-app-adguardhome
+rm -rf package/luci-app-adguardhome
+
+# 克隆自定义仓库到 feeds/luci/applications/（直接覆盖 feeds 源码）
+git clone --depth=1 --branch master https://github.com/stevenjoezhang/luci-app-adguardhome.git feeds/luci/applications/luci-app-adguardhome
+
+# 修改 Makefile，移除对 adguardhome 核心的依赖（避免与预置核心冲突）
+AGH_MAKEFILE="feeds/luci/applications/luci-app-adguardhome/Makefile"
+if [ -f "$AGH_MAKEFILE" ]; then
+    sed -i 's/+adguardhome\b[^ ]*//g' "$AGH_MAKEFILE"
+    sed -i 's/, \+/ /g; s/ \+/, /g; s/,,*/,/g; s/,$//g' "$AGH_MAKEFILE"
+    green "✅ 已移除 AdGuardHome 界面的核心依赖"
+else
+    yellow "⚠️ 未找到 Makefile，请检查克隆是否成功"
+fi
+
+# 从 feeds 索引中彻底删除官方条目，防止被 make 识别
+find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "luci-app-adguardhome" {} \; | while read -r idx; do
+    sed -i '/^define Package\/luci-app-adguardhome/,/^endef/d' "$idx"
+    sed -i '/^PKG_NAME:=luci-app-adguardhome/d' "$idx"
+    green "✅ 已从 $idx 移除官方索引"
+done
+
+green "✅ AdGuardHome 界面已强制使用自定义版本（非官方 26.188）"
+# ========================================
 
 # ---- 4. 私有配置注入 ----
 [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ] && { green "📂 加载私有配置"; cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config; }
@@ -414,4 +448,5 @@ green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
 green "  ✅ 预置 AdGuardHome 最新核心，禁用核心包编译"
+green "  ✅ AdGuardHome 界面强制使用自定义仓库（非官方 26.188）"
 green "========================================="

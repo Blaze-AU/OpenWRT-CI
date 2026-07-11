@@ -135,8 +135,6 @@ force_disable_pkg kmod-ath11k-pci
 
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-# AdGuardHome 将在后面单独处理（先不 set_pkg，避免重复）
-force_disable_pkg adguardhome   # 强制禁用核心包
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 set_pkg luci-app-nss 2>/dev/null || true
 
@@ -165,6 +163,7 @@ green "✅ 用户定制包配置完成"
 
 # ========================================
 # 替换 AdGuardHome 界面为自定义版本（使用 UPDATE_PACKAGE）
+# 注意：此处仅拉取和修改，不设置 .config，待 defconfig 后再强制启用
 # ========================================
 green "=== 替换 AdGuardHome 界面为自定义版本 ==="
 
@@ -188,11 +187,10 @@ find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "PKG_NAME:=l
     green "✅ 已从 $idx 移除官方索引"
 done || true
 
-# 4. 强制安装到构建系统并启用
-green "=== 强制安装自定义 AdGuardHome 包 ==="
+# 4. 强制安装到构建系统（但暂不修改 .config，因后面 defconfig 会重置）
+green "=== 安装自定义 AdGuardHome 包到 feeds ==="
 ./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
-set_pkg luci-app-adguardhome
-green "✅ 已安装并启用自定义 AdGuardHome 包"
+green "✅ 已安装到 feeds，稍后将在 defconfig 后强制启用"
 
 # ---- 4. 私有配置注入 ----
 [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ] && { green "📂 加载私有配置"; cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config; }
@@ -202,6 +200,12 @@ green "✅ 已安装并启用自定义 AdGuardHome 包"
 green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
+
+# ---- 强制安装 AdGuardHome（再次确保 .config 正确） ----
+green "=== 强制安装 AdGuardHome 界面并禁用核心包 ==="
+set_pkg luci-app-adguardhome
+force_disable_pkg adguardhome   # 确保核心包不被选中（与预置冲突）
+green "✅ .config 中已强制启用 luci-app-adguardhome，禁用 adguardhome 核心"
 
 # ---- 6. uci-defaults 系统配置 ----
 green "=== 6. 系统默认配置 ==="

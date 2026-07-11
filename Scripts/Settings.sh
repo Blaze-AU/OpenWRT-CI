@@ -154,6 +154,12 @@ find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "luci-app-ad
 done
 
 green "✅ AdGuardHome 界面已强制使用自定义版本（非官方 26.188）"
+
+# >>>>>>> 新增：强制安装到构建系统，并确保 .config 启用
+green "=== 强制安装自定义 AdGuardHome 包 ==="
+./scripts/feeds install luci-app-adguardhome
+set_pkg luci-app-adguardhome
+green "✅ 已安装并启用自定义 AdGuardHome 包"
 # ========================================
 
 # ---- 4. 私有配置注入 ----
@@ -165,7 +171,9 @@ green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
 
-# ✅ defconfig 之后再次强制禁用 adguardhome
+# >>>>>>> 新增：defconfig 后再次强制启用界面（防止被依赖解析取消）
+set_pkg luci-app-adguardhome
+# >>>>>>> 同时再次禁用核心包
 force_disable_pkg adguardhome
 
 # ---- 6. uci-defaults 系统配置 ----

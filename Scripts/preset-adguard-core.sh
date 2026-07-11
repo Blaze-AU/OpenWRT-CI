@@ -1,11 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# 独立 AdGuardHome 安装脚本：自定义界面 + 预置核心 + 修复版本号
+# 独立 AdGuardHome 安装脚本：自动拉取最新稳定版本 + 预置核心
 # 用法：在 OpenWRT 根目录或其子目录执行
 
-# 不使用 set -e，所有错误通过条件判断和显式 exit 处理
-# set -euo pipefail   # 已禁用
+# 不使用 set -e，所有错误通过显式处理
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
@@ -24,6 +23,27 @@ else
 fi
 echo "📍 当前工作目录：$(pwd)"
 
+# ===================== 获取最新 Release Tag =====================
+get_latest_release() {
+    local repo="$1"
+    local fallback="$2"
+    local tag=""
+
+    # 尝试从 GitHub API 获取最新 release
+    if command -v curl &>/dev/null && command -v jq &>/dev/null; then
+        tag=$(curl -sL "https://api.github.com/repos/$repo/releases/latest" | jq -r '.tag_name' 2>/dev/null)
+    fi
+
+    # 如果获取失败或为空，使用备用版本
+    if [[ -z "$tag" || "$tag" == "null" ]]; then
+        yellow "⚠️ 无法获取最新 Release，使用备用版本: $fallback"
+        tag="$fallback"
+    else
+        green "✅ 获取到最新 Release: $tag"
+    fi
+    echo "$tag"
+}
+
 # ===================== 工具函数 =====================
 UPDATE_PACKAGE() {
     local PKG_NAME="$1"
@@ -36,7 +56,7 @@ UPDATE_PACKAGE() {
 
     echo " "
 
-    # 清理 feeds 和 package 中的旧目录
+    # 清理旧目录
     for NAME in "${PKG_NAME}" "${EXTRA_NAMES[@]}"; do
         echo "Search directory: $NAME"
         find feeds/luci/ feeds/packages/ package/ -maxdepth 3 -type d -iname "*$NAME*" -exec rm -rf {} + 2>/dev/null || true
@@ -47,8 +67,8 @@ UPDATE_PACKAGE() {
 
     mkdir -p package 2>/dev/null || true
 
-    # 克隆到 package/（若失败则显式退出）
-    echo "正在克隆 $PKG_NAME (https://github.com/$PKG_REPO.git 分支 $PKG_BRANCH) 到 package/$REPO_NAME ..."
+    # 克隆指定 tag
+    echo "正在克隆 $PKG_NAME (https://github.com/$PKG_REPO.git tag $PKG_BRANCH) 到 package/$REPO_NAME ..."
     if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME"; then
         red "❌ 克隆 $PKG_NAME 失败，请检查网络或仓库地址"
         return 1
@@ -85,38 +105,27 @@ force_disable_pkg() {
 
 # ===================== 主流程 =====================
 green "========================================="
-green "独立 AdGuardHome 安装脚本（修复版本号）"
+green "独立 AdGuardHome 安装脚本 (自动获取最新稳定版)"
 green "========================================="
 
-# 1. 拉取自定义界面（若失败则退出）
-green "=== 1. 拉取自定义 AdGuardHome 界面 ==="
-if ! UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master"; then
+# 获取最新 Release Tag（备用版本设为 v1.19，因为这是目前已知的最新）
+LATEST_TAG=$(get_latest_release "stevenjoezhang/luci-app-adguardhome" "v1.19")
+green "将使用版本: $LATEST_TAG"
+
+# 1. 拉取最新版本
+green "=== 1. 拉取 AdGuardHome 界面 $LATEST_TAG ==="
+if ! UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "$LATEST_TAG"; then
     red "❌ AdGuardHome 界面拉取失败，终止安装"
     exit 1
 fi
 
-# 2. 移除对 adguardhome 核心的依赖，并修正版本号（避免 APK 构建失败）
-green "=== 2. 移除核心依赖并修正版本号 ==="
+# 2. 移除对 adguardhome 核心的依赖（不修改版本号，官方 tag 版本号合规）
+green "=== 2. 移除核心依赖 ==="
 AGH_MAKEFILE="package/luci-app-adguardhome/Makefile"
 if [ -f "$AGH_MAKEFILE" ]; then
-    # 移除依赖
     sed -i 's/+adguardhome\b[^ ]*//g' "$AGH_MAKEFILE"
     sed -i 's/, \+/ /g; s/ \+/, /g; s/,,*/,/g; s/,$//g' "$AGH_MAKEFILE"
-    
-    # 修正版本号：确保 PKG_VERSION 仅为数字和点，移除短横线及后缀
-    # 例如 1.8-20221120-r1 -> 1.8
-    if grep -q '^PKG_VERSION:=' "$AGH_MAKEFILE"; then
-        sed -i 's/PKG_VERSION:=.*/PKG_VERSION:=1.8/g' "$AGH_MAKEFILE"
-    else
-        echo "PKG_VERSION:=1.8" >> "$AGH_MAKEFILE"
-    fi
-    # 设置 PKG_RELEASE 为 1
-    if grep -q '^PKG_RELEASE:=' "$AGH_MAKEFILE"; then
-        sed -i 's/PKG_RELEASE:=.*/PKG_RELEASE:=1/g' "$AGH_MAKEFILE"
-    else
-        echo "PKG_RELEASE:=1" >> "$AGH_MAKEFILE"
-    fi
-    green "✅ 已移除核心依赖并修正版本号为 1.8-1"
+    green "✅ 已移除 AdGuardHome 界面的核心依赖"
 else
     yellow "⚠️ 未找到 Makefile，请检查克隆是否成功"
 fi
@@ -137,23 +146,23 @@ else
     green "✅ 已安装到 feeds"
 fi
 
-# 5. 确保 .config 中启用界面并禁用核心（先执行一次，defconfig 后会重置，后面再次执行）
+# 5. 预配置 .config
 green "=== 5. 预配置 .config ==="
 touch ./.config
 set_pkg luci-app-adguardhome
 force_disable_pkg adguardhome
 
-# 6. 运行 defconfig 补全依赖
+# 6. defconfig 补全依赖
 green "=== 6. 补全依赖 (make defconfig) ==="
 make defconfig > /dev/null 2>&1 || true
 green "✅ defconfig 完成"
 
-# 7. defconfig 后再次强制设置（确保不被重置）
+# 7. defconfig 后再次强制设置
 green "=== 7. 再次强制启用并禁用核心 ==="
 set_pkg luci-app-adguardhome
 force_disable_pkg adguardhome
 
-# 8. 校验
+# 8. 校验配置
 green "=== 8. 校验配置 ==="
 if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
     red "❌ adguardhome 核心包仍启用，强制禁用..."
@@ -187,11 +196,10 @@ fi
 # ---- 完成 ----
 green ""
 green "========================================="
-green "✅ AdGuardHome 独立安装完成"
+green "✅ AdGuardHome 独立安装完成 ($LATEST_TAG)"
 green "========================================="
-green "  ✅ 自定义界面已拉取并安装到 feeds"
+green "  ✅ 已自动拉取最新稳定版本: $LATEST_TAG"
 green "  ✅ 核心依赖已移除，官方索引已清理"
-green "  ✅ 版本号已修正为 1.8-1（符合 APK 要求）"
 green "  ✅ .config 已强制启用界面、禁用核心"
 green "  ✅ 核心二进制已预置到 files/usr/bin"
 green "========================================="

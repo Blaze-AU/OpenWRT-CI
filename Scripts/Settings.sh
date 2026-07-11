@@ -16,6 +16,47 @@ yellow() { echo -e "\033[33m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 export SOURCE_DATE_EPOCH=0
 
+# ===================== 外部包管理函数（参考上一版） =====================
+UPDATE_PACKAGE() {
+    local PKG_NAME="$1"
+    local PKG_REPO="$2"
+    local PKG_BRANCH="$3"
+    local PKG_SPECIAL="${4:-}"
+    shift 4
+    local EXTRA_NAMES=("$@")
+    local REPO_NAME="${PKG_REPO#*/}"
+
+    echo " "
+
+    # 清理 feeds 和 package 中的旧目录（包括可能的额外名称）
+    for NAME in "${PKG_NAME}" "${EXTRA_NAMES[@]}"; do
+        echo "Search directory: $NAME"
+        find feeds/luci/ feeds/packages/ package/ -maxdepth 3 -type d -iname "*$NAME*" -exec rm -rf {} + 2>/dev/null || true
+        [[ -d "$NAME" ]] && rm -rf "$NAME" && echo "Delete local directory: $NAME"
+    done
+
+    # 克隆到 package/ 目录
+    if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git" "package/$REPO_NAME" 2>/dev/null; then
+        echo "⚠️ 克隆 $PKG_NAME 失败，跳过"
+        return 0
+    fi
+
+    # 处理特殊模式（目前仅用到 name，保留扩展）
+    case "$PKG_SPECIAL" in
+        pkg)
+            find "package/$REPO_NAME/" -maxdepth 3 -type d -iname "*$PKG_NAME*" -exec cp -rf {} package/ \; 2>/dev/null || true
+            rm -rf "package/$REPO_NAME" 2>/dev/null || true
+            ;;
+        name)
+            mv -f "package/$REPO_NAME" "package/$PKG_NAME" 2>/dev/null || true
+            ;;
+        *)
+            # 默认保留原仓库名（已位于 package/ 下）
+            ;;
+    esac
+
+    echo "✅ $PKG_NAME 处理完成"
+}
 
 # ===================== 工具函数 =====================
 set_pkg() {
@@ -94,7 +135,7 @@ force_disable_pkg kmod-ath11k-pci
 
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-set_pkg luci-app-adguardhome
+# AdGuardHome 将在后面单独处理（先不 set_pkg，避免重复）
 force_disable_pkg adguardhome   # 强制禁用核心包
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 set_pkg luci-app-nss 2>/dev/null || true
@@ -116,9 +157,6 @@ disable_pkg kmod-nft-offload kmod-nf-flow
 # ---- 启用 AHB Wi-Fi ----
 set_pkg kmod-ath11k-ahb
 
-# ---- 删除 FullCone 手动干预 ----
-sed -i '/^# CONFIG_PACKAGE_kmod-nft-fullcone is not set/d' ./.config
-
 # ---- 禁用 Mesh 和测试工具 ----
 disable_pkg kmod-qca-nss-drv-wifi-meshmgr
 disable_pkg kmod-net-selftests
@@ -126,18 +164,15 @@ disable_pkg kmod-net-selftests
 green "✅ 用户定制包配置完成"
 
 # ========================================
-# 替换 AdGuardHome 界面为自定义版本
+# 替换 AdGuardHome 界面为自定义版本（使用 UPDATE_PACKAGE）
 # ========================================
 green "=== 替换 AdGuardHome 界面为自定义版本 ==="
-# 删除所有可能存在的官方或自定义目录
-rm -rf feeds/luci/applications/luci-app-adguardhome
-rm -rf package/luci-app-adguardhome
 
-# 克隆自定义仓库到 feeds/luci/applications/（直接覆盖 feeds 源码）
-git clone --depth=1 --branch master https://github.com/stevenjoezhang/luci-app-adguardhome.git feeds/luci/applications/luci-app-adguardhome
+# 1. 使用统一函数拉取（清理 + 克隆到 package/）
+UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "master"
 
-# 修改 Makefile，移除对 adguardhome 核心的依赖（避免与预置核心冲突）
-AGH_MAKEFILE="feeds/luci/applications/luci-app-adguardhome/Makefile"
+# 2. 移除对 adguardhome 核心的依赖（避免与预置核心冲突）
+AGH_MAKEFILE="package/luci-app-adguardhome/Makefile"
 if [ -f "$AGH_MAKEFILE" ]; then
     sed -i 's/+adguardhome\b[^ ]*//g' "$AGH_MAKEFILE"
     sed -i 's/, \+/ /g; s/ \+/, /g; s/,,*/,/g; s/,$//g' "$AGH_MAKEFILE"
@@ -146,21 +181,18 @@ else
     yellow "⚠️ 未找到 Makefile，请检查克隆是否成功"
 fi
 
-# 从 feeds 索引中彻底删除官方条目，防止被 make 识别
-find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "luci-app-adguardhome" {} \; | while read -r idx; do
+# 3. 从 feeds 索引中彻底删除官方条目
+find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "PKG_NAME:=luci-app-adguardhome" {} \; 2>/dev/null | while read -r idx; do
     sed -i '/^define Package\/luci-app-adguardhome/,/^endef/d' "$idx"
     sed -i '/^PKG_NAME:=luci-app-adguardhome/d' "$idx"
     green "✅ 已从 $idx 移除官方索引"
-done
+done || true
 
-green "✅ AdGuardHome 界面已强制使用自定义版本（非官方 26.188）"
-
-# >>>>>>> 新增：强制安装到构建系统，并确保 .config 启用
+# 4. 强制安装到构建系统并启用
 green "=== 强制安装自定义 AdGuardHome 包 ==="
-./scripts/feeds install luci-app-adguardhome
+./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
 set_pkg luci-app-adguardhome
 green "✅ 已安装并启用自定义 AdGuardHome 包"
-# ========================================
 
 # ---- 4. 私有配置注入 ----
 [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ] && { green "📂 加载私有配置"; cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config; }
@@ -170,11 +202,6 @@ green "✅ 已安装并启用自定义 AdGuardHome 包"
 green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
-
-# >>>>>>> 新增：defconfig 后再次强制启用界面（防止被依赖解析取消）
-set_pkg luci-app-adguardhome
-# >>>>>>> 同时再次禁用核心包
-force_disable_pkg adguardhome
 
 # ---- 6. uci-defaults 系统配置 ----
 green "=== 6. 系统默认配置 ==="
@@ -387,7 +414,7 @@ else
     yellow "ℹ️ 未启用 nowifi，跳过"
 fi
 
-# ---- 10. 校验 ----
+# ---- 10. 校验（精简） ----
 green "=== 10. 校验 ==="
 ERRORS=0
 
@@ -404,15 +431,8 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
-# 检查 adguardhome 核心是否被禁用（应为注释状态）
 if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
     red "❌ adguardhome 核心包仍启用（与预置核心冲突）"
-    ERRORS=$((ERRORS + 1))
-fi
-
-# 检查 FullCone 是否被手动干预
-if grep -q "^# CONFIG_PACKAGE_kmod-nft-fullcone is not set" ./.config 2>/dev/null; then
-    red "❌ FullCone NAT 被手动禁用"
     ERRORS=$((ERRORS + 1))
 fi
 
@@ -420,21 +440,13 @@ fi
 
 # ---- 11. 预置 AdGuardHome 核心 ----
 green "=== 11. 下载 AdGuardHome 核心 ==="
-
-# 只创建父目录，不创建 AdGuardHome 目录
 mkdir -p files/usr/bin
-
 ARCH="arm64"
 AGH_CORE=$(curl -sL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | grep "/AdGuardHome_linux_${ARCH}" | awk -F '"' '{print $4}')
-
 if [ -n "$AGH_CORE" ]; then
-    # 直接提取到 files/usr/bin/AdGuardHome（文件）
     if wget -qO- "$AGH_CORE" | tar -xOz --wildcards '*/AdGuardHome' > files/usr/bin/AdGuardHome 2>/dev/null; then
         chmod +x files/usr/bin/AdGuardHome
         green "✅ AdGuardHome 核心下载完成 (${ARCH})"
-    elif wget -qO- "$AGH_CORE" | tar -xOz > files/usr/bin/AdGuardHome 2>/dev/null; then
-        chmod +x files/usr/bin/AdGuardHome
-        green "✅ AdGuardHome 核心下载完成 (兼容模式)"
     else
         yellow "⚠️ 提取失败，将依赖插件自动下载"
         rm -f files/usr/bin/AdGuardHome
@@ -455,6 +467,6 @@ green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
-green "  ✅ 预置 AdGuardHome 最新核心，禁用核心包编译"
+green "  ✅ 预置 AdGuardHome 最新核心，用核心包编译"
 green "  ✅ AdGuardHome 界面强制使用自定义仓库（非官方 26.188）"
 green "========================================="

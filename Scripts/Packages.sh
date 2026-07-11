@@ -44,30 +44,37 @@ UPDATE_PACKAGE() {
 	fi
 }
 
-# 更新软件包版本（当前未启用）
+# 更新软件包版本（当前未启用，但函数需完整）
 UPDATE_VERSION() {
-	# ... 不变 ...
 	local PKG_NAME=$1
 	local PKG_MARK=${2:-false}
 	local PKG_FILES=$(find ./package/ ./feeds/packages/ -maxdepth 3 -type f -wholename "*/$PKG_NAME/Makefile" 2>/dev/null)
+
 	if [ -z "$PKG_FILES" ]; then
 		echo "$PKG_NAME not found!"
 		return
 	fi
+
 	echo -e "\n$PKG_NAME version update has started!"
+
 	for PKG_FILE in $PKG_FILES; do
 		local PKG_REPO=$(grep -Po "PKG_SOURCE_URL:=https://.*github.com/\K[^/]+/[^/]+(?=.*)" $PKG_FILE)
 		local PKG_TAG=$(curl -sL "https://api.github.com/repos/$PKG_REPO/releases" | jq -r "map(select(.prerelease == $PKG_MARK)) | first | .tag_name")
+
 		local OLD_VER=$(grep -Po "PKG_VERSION:=\K.*" "$PKG_FILE")
 		local OLD_URL=$(grep -Po "PKG_SOURCE_URL:=\K.*" "$PKG_FILE")
 		local OLD_FILE=$(grep -Po "PKG_SOURCE:=\K.*" "$PKG_FILE")
 		local OLD_HASH=$(grep -Po "PKG_HASH:=\K.*" "$PKG_FILE")
+
 		local PKG_URL=$([[ "$OLD_URL" == *"releases"* ]] && echo "${OLD_URL%/}/$OLD_FILE" || echo "${OLD_URL%/}")
+
 		local NEW_VER=$(echo $PKG_TAG | sed -E 's/[^0-9]+/\./g; s/^\.|\.$//g')
 		local NEW_URL=$(echo $PKG_URL | sed "s/\$(PKG_VERSION)/$NEW_VER/g; s/\$(PKG_NAME)/$PKG_NAME/g")
 		local NEW_HASH=$(curl -sL "$NEW_URL" | sha256sum | cut -d ' ' -f 1)
+
 		echo "old version: $OLD_VER $OLD_HASH"
 		echo "new version: $NEW_VER $NEW_HASH"
+
 		if [[ "$NEW_VER" =~ ^[0-9].* ]] && dpkg --compare-versions "$OLD_VER" lt "$NEW_VER"; then
 			sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$NEW_VER/g" "$PKG_FILE"
 			sed -i "s/PKG_HASH:=.*/PKG_HASH:=$NEW_HASH/g" "$PKG_FILE"
@@ -96,9 +103,6 @@ if [ -f "$AGH_MAKEFILE" ]; then
 else
     echo "⚠️ 未找到 Makefile"
 fi
-
-# 删除官方核心源码（可选，如需彻底避免核心编译）
-# rm -rf feeds/packages/net/adguardhome
 
 # 确保目标目录存在
 mkdir -p feeds/luci/applications/
@@ -145,9 +149,25 @@ fi
 
 
 # ========================================
-# 二次加固：确保软链接在编译前一定生效
+# 二次加固 + 彻底屏蔽官方包
 # ========================================
-echo "=== 二次加固 AdGuardHome 软链接 ==="
+echo "=== 二次加固 AdGuardHome 软链接并移除官方索引 ==="
+
+# 再次强制创建软链接
 rm -rf feeds/luci/applications/luci-app-adguardhome
 ln -sf ../../package/luci-app-adguardhome feeds/luci/applications/
-echo "✅ 已再次强制创建软链接"
+echo "✅ 软链接已重新创建"
+
+# 【关键】从 feeds 索引中彻底删除官方包的条目，让 make 忽略它
+# 查找所有包含 luci-app-adguardhome 的索引文件（如 ipkg-*/Makefile）
+find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "luci-app-adguardhome" {} \; | while read -r idx_file; do
+    # 备份原文件
+    cp "$idx_file" "$idx_file.bak"
+    # 删除包含 PKG_NAME:=luci-app-adguardhome 的整个定义块（简单方式：删除该行及后续几行，但更安全的是用 sed 删除多行）
+    # 使用 sed 删除从 "define Package/luci-app-adguardhome" 到下一个 "endef" 以及相关行
+    sed -i '/^define Package\/luci-app-adguardhome/,/^endef/d' "$idx_file"
+    sed -i '/^PKG_NAME:=luci-app-adguardhome/d' "$idx_file"
+    echo "✅ 已从索引文件 $idx_file 中移除官方条目"
+done
+
+echo "✅ 已完成二次加固，编译将强制使用 package/ 中的自定义版本"

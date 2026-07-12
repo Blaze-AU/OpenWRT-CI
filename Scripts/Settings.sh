@@ -1,9 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 - LibWrt main-nss 精简版
-# 仅添加 LibWrt 未包含的用户定制：IPTV、主题、NTP、热插拔
-# 架构: DSA | qualcommax/ipq60xx | 内核6.12.94+
+# IPQ60XX NSS 加速 
 
 set -eo pipefail
 
@@ -122,6 +120,15 @@ green "✅ 用户定制包配置完成"
 green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
+
+# ===================== 强制启用 AdGuardHome（界面 + 核心包） =====================
+green "=== 强制启用 AdGuardHome（界面 + 核心包） ==="
+# 启用界面
+sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome=/d" ./.config
+echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
+# 再次运行 defconfig 吸收新配置
+make defconfig > /dev/null 2>&1
+green "✅ AdGuardHome 界面 + 核心包已强制启用"
 
 # ---- 6. uci-defaults 系统配置（用户定制） ----
 green "=== 6. 系统默认配置 ==="
@@ -370,6 +377,16 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
+# ===================== 校验 AdGuardHome 配置 =====================
+if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
+    green "✅ luci-app-adguardhome 已启用"
+else
+    red "❌ luci-app-adguardhome 未启用，重新强制写入..."
+    sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome=/d" ./.config
+    echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
+fi
+
+
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
 # ---- 完成 ----
@@ -384,4 +401,5 @@ green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
+green "  ✅ AdGuardHome 界面
 green "========================================="

@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 + 系统配置（不含 AdGuardHome 强制启用，由 GENERAL.txt 控制）
+# IPQ60XX NSS 加速 + 系统配置（AdGuardHome 强制绑定自定义包）
 
 set -eo pipefail
 
@@ -115,6 +115,21 @@ green "✅ 用户定制包配置完成"
 # ---- 4. 通用配置注入（GENERAL.txt） ----
 [ -f "$GITHUB_WORKSPACE/Config/GENERAL.txt" ] && { green "📂 加载通用配置"; cat "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> ./.config; }
 [ -n "$WRT_PACKAGE" ] && { green "📦 追加自定义包"; echo -e "$WRT_PACKAGE" >> ./.config; }
+
+# ---- 4.5 强制绑定 AdGuardHome 自定义包（在 defconfig 之前） ----
+green "=== 强制绑定 AdGuardHome 自定义包 ==="
+# 禁用官方包（界面 + 核心）
+for pkg in luci-app-adguardhome adguardhome; do
+    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" ./.config
+    sed -i "/^# CONFIG_PACKAGE_${pkg}/d" ./.config
+done
+echo "CONFIG_PACKAGE_luci-app-adguardhome=n" >> ./.config
+echo "CONFIG_PACKAGE_adguardhome=n" >> ./.config
+
+# 启用自定义包
+sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome-kong=/d" ./.config
+echo "CONFIG_PACKAGE_luci-app-adguardhome-kong=y" >> ./.config
+green "✅ 已强制绑定：luci-app-adguardhome-kong=y，官方包已禁用"
 
 # ---- 5. defconfig 补全依赖 ----
 green "=== 5. defconfig 补全依赖 ==="
@@ -382,5 +397,5 @@ green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
-green "  ✅ 用户配置已从 GENERAL.txt 加载（含 AdGuardHome 设置）"
+green "  ✅ 已强制绑定自定义 AdGuardHome 包 (luci-app-adguardhome-kong)"
 green "========================================="

@@ -18,6 +18,10 @@ CONFIG_PACKAGE_libwebsockets=y
 CONFIG_PACKAGE_luci-app-wolultra=y
 CONFIG_PACKAGE_etherwake=y
 
+CONFIG_PACKAGE_luci-app-adguardhome=n
+CONFIG_PACKAGE_adguardhome=n
+CONFIG_PACKAGE_luci-app-adguardhome-kong=y
+
 # ==================== 删除无用插件 ====================
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
 CONFIG_PACKAGE_luci-app-gecoosac=n

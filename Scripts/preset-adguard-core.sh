@@ -41,6 +41,7 @@ green "========================================="
 green "🧹 清理官方 AdGuardHome 相关包..."
 rm -rf feeds/luci/applications/luci-app-adguardhome
 rm -rf feeds/packages/net/adguardhome
+rm -rf package/luci-app-adguardhome-tmp
 rm -f feeds/luci.index feeds/packages.index
 
 # 2. 克隆并重命名

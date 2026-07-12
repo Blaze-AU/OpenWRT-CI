@@ -8,7 +8,7 @@ red()    { echo -e "\033[31m$*\033[0m"; }
 green()  { echo -e "\033[32m$*\033[0m"; }
 yellow() { echo -e "\033[33m$*\033[0m"; }
 
-# 自动查找 OpenWrt 根目录
+# ---------- 自动查找 OpenWrt 根目录 ----------
 find_openwrt_root() {
     local dir="$PWD"
     while [ "$dir" != "/" ]; do
@@ -31,39 +31,69 @@ fi
 cd "$OPENWRT_ROOT"
 green "✅ 切换到 OpenWrt 根目录: $OPENWRT_ROOT"
 
-# ---------- 以下是你原来的主流程 ----------
+# ---------- 主流程 ----------
 green "========================================="
 green "AdGuardHome 自定义包（kongfl888 版）"
 green "包名改为 luci-app-adguardhome-kong"
 green "========================================="
 
-# 1. 清理官方包
-green "🧹 清理官方 AdGuardHome 相关包..."
-rm -rf feeds/luci/applications/luci-app-adguardhome
-rm -rf feeds/packages/net/adguardhome
+# 1. 清理旧克隆目录
+green "🧹 清理旧克隆目录..."
 rm -rf package/luci-app-adguardhome-tmp
-rm -f feeds/luci.index feeds/packages.index
+rm -rf package/luci-app-adguardhome-kong
 
 # 2. 克隆并重命名
 green "📦 克隆 kongfl888/luci-app-adguardhome (master 分支)..."
 git clone --depth=1 -b master https://github.com/kongfl888/luci-app-adguardhome package/luci-app-adguardhome-tmp
 mv package/luci-app-adguardhome-tmp package/luci-app-adguardhome-kong
 
-# 3. 修改 Makefile 中的包名
+# 3. 修改 Makefile
 MAKEFILE="package/luci-app-adguardhome-kong/Makefile"
-if [ -f "$MAKEFILE" ]; then
-    sed -i 's/^PKG_NAME\s*:=.*/PKG_NAME:=luci-app-adguardhome-kong/' "$MAKEFILE"
-    green "✅ 已修改 Makefile 中的 PKG_NAME"
-else
-    yellow "⚠️ Makefile 不存在，请手动检查"
+if [ ! -f "$MAKEFILE" ]; then
+    red "❌ Makefile 不存在，请检查克隆是否成功"
+    exit 1
 fi
 
-# 4. 更新 feeds
+# 3a. 修改包名
+sed -i 's/^PKG_NAME\s*:=.*/PKG_NAME:=luci-app-adguardhome-kong/' "$MAKEFILE"
+green "✅ 已修改 PKG_NAME"
+
+# 3b. 修正版本号，使 APK 打包通过（将 '-' 替换为 '.'，并保证 PKG_RELEASE 为纯数字）
+if grep -q '^PKG_VERSION\s*:=' "$MAKEFILE"; then
+    OLD_VER=$(grep '^PKG_VERSION\s*:=' "$MAKEFILE" | sed 's/^PKG_VERSION\s*:=\s*//')
+    NEW_VER=$(echo "$OLD_VER" | sed 's/-/./g')
+    sed -i "s/^PKG_VERSION\s*:=.*/PKG_VERSION:=$NEW_VER/" "$MAKEFILE"
+    green "✅ 已修正 PKG_VERSION: $OLD_VER -> $NEW_VER"
+else
+    yellow "⚠️ 未找到 PKG_VERSION，将添加默认版本"
+    echo 'PKG_VERSION:=1.8.20221120' >> "$MAKEFILE"
+fi
+
+if grep -q '^PKG_RELEASE\s*:=' "$MAKEFILE"; then
+    OLD_REL=$(grep '^PKG_RELEASE\s*:=' "$MAKEFILE" | sed 's/^PKG_RELEASE\s*:=\s*//')
+    if [[ "$OLD_REL" =~ [^0-9] ]]; then
+        sed -i 's/^PKG_RELEASE\s*:=.*/PKG_RELEASE:=1/' "$MAKEFILE"
+        green "✅ 已将 PKG_RELEASE 从 '$OLD_REL' 修正为 '1'"
+    else
+        green "✅ PKG_RELEASE 已合法: $OLD_REL"
+    fi
+else
+    echo 'PKG_RELEASE:=1' >> "$MAKEFILE"
+    green "✅ 已添加 PKG_RELEASE:=1"
+fi
+
+# 4. 更新 feeds（必须在删除官方包之前，否则会被恢复）
 green "🔄 更新 feeds..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 5. 预置核心（arm64）
+# 5. 清理官方包目录（虽然新包名不同，但保持整洁）
+green "🧹 删除官方包目录（避免误选）..."
+rm -rf feeds/luci/applications/luci-app-adguardhome
+rm -rf feeds/packages/net/adguardhome
+rm -f feeds/luci.index feeds/packages.index
+
+# 6. 预置核心（arm64）
 green "⬇️ 预置 AdGuardHome 核心（arm64）..."
 mkdir -p files/usr/bin
 if command -v jq >/dev/null 2>&1; then
@@ -84,9 +114,8 @@ fi
 green "========================================="
 green "✅ 准备完成"
 green "  - 自定义包: luci-app-adguardhome-kong"
-green "  - 官方包已被禁用"
-green "  - 请在 Settings.sh 或 .config 中启用新包："
+green "  - 官方包已从 feeds 中移除"
+green "  - 请在 .config 中启用："
 green "    CONFIG_PACKAGE_luci-app-adguardhome-kong=y"
-green "    CONFIG_PACKAGE_luci-app-adguardhome=n"
 green "========================================="
 exit 0

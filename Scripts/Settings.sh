@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 
+# IPQ60XX NSS 加速 + AdGuardHome 强制启用（界面 + 核心包）
 
 set -eo pipefail
 
@@ -126,6 +126,10 @@ green "=== 强制启用 AdGuardHome（界面 + 核心包） ==="
 # 启用界面
 sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome=/d" ./.config
 echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
+# 启用核心包
+sed -i "/^CONFIG_PACKAGE_adguardhome=/d" ./.config
+sed -i "/^# CONFIG_PACKAGE_adguardhome/d" ./.config
+echo "CONFIG_PACKAGE_adguardhome=y" >> ./.config
 # 再次运行 defconfig 吸收新配置
 make defconfig > /dev/null 2>&1
 green "✅ AdGuardHome 界面 + 核心包已强制启用"
@@ -377,7 +381,7 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
-# ===================== 校验 AdGuardHome 配置 =====================
+# ===================== 校验 AdGuardHome 配置（界面 + 核心包） =====================
 if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
     green "✅ luci-app-adguardhome 已启用"
 else
@@ -386,6 +390,14 @@ else
     echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
 fi
 
+if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
+    green "✅ adguardhome 核心包已启用"
+else
+    red "❌ adguardhome 核心包未启用，重新强制写入..."
+    sed -i "/^CONFIG_PACKAGE_adguardhome=/d" ./.config
+    sed -i "/^# CONFIG_PACKAGE_adguardhome/d" ./.config
+    echo "CONFIG_PACKAGE_adguardhome=y" >> ./.config
+fi
 
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
@@ -401,5 +413,5 @@ green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
-green "  ✅ AdGuardHome 界面
+green "  ✅ AdGuardHome 界面 + 核心包均已强制启用"
 green "========================================="

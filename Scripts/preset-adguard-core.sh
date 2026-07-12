@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# 强制安装 AdGuardHome：无视 .config 原有状态，直接拉取并强制编译
+# AdGuardHome 源码拉取 + 核心预置（不修改 .config）
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
@@ -20,8 +20,7 @@ else
 fi
 echo "📍 当前工作目录：$(pwd)"
 
-# ---------- 工具函数 ----------
-# 清理并拉取
+# ---------- 拉取源码 ----------
 clone_adg() {
     local repo="$1"
     local branch="$2"
@@ -62,21 +61,12 @@ clone_adg() {
     return 0
 }
 
-# 强制写入 .config（无论之前是什么）
-force_enable() {
-    sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome=/d" ./.config
-    echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
-    sed -i "/^CONFIG_PACKAGE_adguardhome=/d" ./.config
-    sed -i "/^# CONFIG_PACKAGE_adguardhome/d" ./.config
-    echo "# CONFIG_PACKAGE_adguardhome is not set" >> ./.config
-}
-
 # ---------- 主流程 ----------
 green "========================================="
-green "强制安装 AdGuardHome（不依赖原 .config）"
+green "AdGuardHome 源码拉取 + 核心预置"
 green "========================================="
 
-# 1. 获取最新 Tag（备用 v1.19）
+# 1. 获取最新 Tag
 LATEST_TAG=$(curl -sL https://api.github.com/repos/stevenjoezhang/luci-app-adguardhome/releases/latest | jq -r '.tag_name' 2>/dev/null)
 [[ -z "$LATEST_TAG" || "$LATEST_TAG" == "null" ]] && LATEST_TAG="v1.19"
 green "将使用版本: $LATEST_TAG"
@@ -90,30 +80,7 @@ fi
 # 3. 尝试 feeds install（忽略失败）
 ./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
 
-# 4. 强制写入 .config（第一次）
-green "=== 强制写入 .config（前） ==="
-force_enable
-
-# 5. 运行 defconfig（可能重置，但我们会再次强制）
-green "=== 运行 defconfig（忽略失败） ==="
-make defconfig 2>/dev/null || true
-
-# 6. 再次强制写入 .config（确保未被重置）
-green "=== 强制写入 .config（后） ==="
-force_enable
-
-# 7. 最终验证并追加（确保万无一失）
-if ! grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config; then
-    echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
-fi
-if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config; then
-    sed -i "/^CONFIG_PACKAGE_adguardhome=/d" ./.config
-    echo "# CONFIG_PACKAGE_adguardhome is not set" >> ./.config
-fi
-
-green "✅ .config 已强制包含 luci-app-adguardhome"
-
-# 8. 预置核心（arm64，可选）
+# 4. 预置核心（arm64）
 green "=== 预置 AdGuardHome 核心 ==="
 mkdir -p files/usr/bin
 AGH_URL=$(curl -sL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]*linux_arm64[^"]*' | head -1)
@@ -121,16 +88,16 @@ if [[ -n "$AGH_URL" ]]; then
     wget -qO- "$AGH_URL" | tar -xOz --wildcards '*/AdGuardHome' > files/usr/bin/AdGuardHome 2>/dev/null && {
         chmod +x files/usr/bin/AdGuardHome
         green "✅ 核心下载成功"
-    } || yellow "⚠️ 核心下载失败，编译时可能自动下载"
+    } || yellow "⚠️ 核心下载失败"
 else
     yellow "⚠️ 未找到 arm64 核心下载链接"
 fi
 
 green "========================================="
-green "✅ AdGuardHome 强制安装流程完成"
-green "  - 源码已拉取（$LATEST_TAG）"
+green "✅ AdGuardHome 源码 + 核心准备完成"
+green "  - 版本: $LATEST_TAG"
 green "  - 核心依赖已移除"
-green "  - .config 已强制启用界面、禁用核心"
-green "  - 即使有警告，编译时将包含该包"
+green "  - 核心已预置（如成功下载）"
+green "  - 注意：.config 配置由 Settings.sh 负责"
 green "========================================="
 exit 0

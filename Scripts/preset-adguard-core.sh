@@ -1,92 +1,101 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
+# 强制替换 feeds 中的 AdGuardHome 源码为 kongfl888 版
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 
-# ---------- 拉取源码 ----------
-clone_adg() {
+# ---------- 拉取并覆盖源码 ----------
+clone_and_override() {
     local repo="$1"
     local branch="$2"
     local pkg_name="luci-app-adguardhome"
     local repo_name="${repo#*/}"
 
-    # 1. 卸载 feeds 中的官方包（避免索引残留）
+    # 1. 卸载 feeds 中的包
     echo "正在卸载 feeds 中的官方包 ..."
     ./scripts/feeds uninstall "$pkg_name" 2>/dev/null || true
     ./scripts/feeds uninstall "adguardhome" 2>/dev/null || true
 
-    # 2. 精确删除 feeds 中的官方包目录
-    echo "正在删除 feeds 中的官方目录 ..."
+    # 2. 删除所有相关目录（包括 package/ 和 feeds/）
+    echo "正在删除所有相关目录 ..."
+    rm -rf "package/$repo_name"
     rm -rf feeds/luci/applications/luci-app-adguardhome
     rm -rf feeds/packages/net/adguardhome
     rm -rf package/feeds/luci/luci-app-adguardhome
     rm -rf package/feeds/packages/adguardhome
+    # 用 find 清理可能残留的深层目录
+    find . -type d -iname "*$pkg_name*" -exec rm -rf {} + 2>/dev/null || true
+    find . -type d -iname "adguardhome" -exec rm -rf {} + 2>/dev/null || true
 
-    # 3. 扩展删除所有相关目录
-    echo "正在删除所有相关目录 ..."
-    for name in "$pkg_name" "adguardhome"; do
-        find feeds/luci/ feeds/packages/ package/ -maxdepth 4 -type d -iname "*$name*" -exec rm -rf {} + 2>/dev/null || true
-        [[ -d "$name" ]] && rm -rf "$name"
-    done
-
-    # 4. 删除 feeds 索引文件
-    echo "正在删除 feeds 索引文件 ..."
+    # 3. 删除 feeds 索引和 tmp 缓存（强制刷新）
+    echo "正在删除 feeds 索引和构建缓存 ..."
     rm -f feeds/luci.index feeds/packages.index
+    rm -rf tmp/
 
-    # 5. 克隆自定义版本到 package/
-    rm -rf "package/$repo_name"
+    # 4. 克隆自定义版本到 package/ 目录
     mkdir -p package
     echo "正在克隆 $pkg_name (https://github.com/$repo.git 分支 $branch) ..."
     if ! git clone --depth=1 --single-branch --branch "$branch" "https://github.com/$repo.git" "package/$repo_name"; then
-        red "❌ 克隆失败，尝试使用默认分支 master"
+        red "❌ 克隆失败，尝试默认分支 master"
         if ! git clone --depth=1 --single-branch --branch master "https://github.com/$repo.git" "package/$repo_name"; then
             red "❌ 克隆失败"
             return 1
         fi
     fi
 
-    # 6. 移除核心依赖
+    # 5. 修改 Makefile：移除核心依赖 + 修改 PKG_VERSION 以区分官方
     local makefile="package/$repo_name/Makefile"
     if [[ -f "$makefile" ]]; then
+        # 移除 +adguardhome 依赖
         sed -i 's/+adguardhome\b[^ ]*//g' "$makefile"
         sed -i 's/, \+/ /g; s/ \+/, /g; s/,,*/,/g; s/,$//g' "$makefile"
-        green "✅ 已移除核心依赖"
+
+        # 修改 PKG_VERSION 追加 "-kongfl888" 以强制区分官方版本
+        if grep -q "^PKG_VERSION:=" "$makefile"; then
+            sed -i 's/^PKG_VERSION:=.*/PKG_VERSION:=v1.8-kongfl888/' "$makefile"
+        else
+            # 若没有则插入
+            sed -i '/include $(TOPDIR)\/rules.mk/a PKG_VERSION:=v1.8-kongfl888' "$makefile"
+        fi
+        green "✅ 已移除核心依赖并修改 PKG_VERSION"
     else
-        yellow "⚠️ Makefile 不存在，请检查仓库结构"
+        yellow "⚠️ Makefile 不存在"
+        return 1
     fi
 
-    # 7. 将自定义包复制到 feeds 目录（强制覆盖官方位置）
-    echo "正在将自定义包复制到 feeds 目录 ..."
+    # 6. 将自定义包复制到 feeds 目录（覆盖官方位置）
+    echo "正在覆盖 feeds 中的官方包 ..."
     mkdir -p feeds/luci/applications
     rm -rf feeds/luci/applications/luci-app-adguardhome
     cp -r "package/$repo_name" feeds/luci/applications/luci-app-adguardhome
 
-    # 8. 刷新 feeds 索引（重新生成，包含自定义包）
-    echo "正在刷新 feeds 索引 ..."
+    # 7. 重新生成 feeds 索引（使用 -i 仅更新索引）
+    echo "正在重新生成 feeds 索引 ..."
     ./scripts/feeds update -i 2>/dev/null || true
 
-    # 9. 清理编译缓存
+    # 8. 强制清理该包的构建产物
     echo "正在清理编译缓存 ..."
     make package/luci-app-adguardhome/clean 2>/dev/null || true
+    rm -rf build_dir/target-*/luci-app-adguardhome
+    rm -rf staging_dir/target-*/pkginfo/*adguardhome*
 
-    green "✅ 源码准备完成（自定义版已同时存在于 package/ 和 feeds/）"
+    green "✅ 源码替换完成（自定义版已同时存在于 package/ 和 feeds/）"
     return 0
 }
 
 # ---------- 主流程 ----------
 green "========================================="
-green "AdGuardHome 源码替换 (官方 → kongfl888)"
-green "强制覆盖 feeds 目录，确保使用自定义版本"
+green "强制替换 AdGuardHome 源码为 kongfl888 版"
 green "========================================="
 
 BRANCH="master"
 green "将使用分支: $BRANCH"
 
-if ! clone_adg "kongfl888/luci-app-adguardhome" "$BRANCH"; then
-    red "❌ 源码拉取失败，终止"
+if ! clone_and_override "kongfl888/luci-app-adguardhome" "$BRANCH"; then
+    red "❌ 操作失败，终止"
     exit 1
 fi
 
@@ -98,17 +107,20 @@ if [[ -n "$AGH_URL" ]]; then
     wget -qO- "$AGH_URL" | tar -xOz --wildcards '*/AdGuardHome' > files/usr/bin/AdGuardHome 2>/dev/null && {
         chmod +x files/usr/bin/AdGuardHome
         green "✅ 核心下载成功"
-    } || yellow "⚠️ 核心下载失败（wget 或 tar 错误）"
+    } || yellow "⚠️ 核心下载失败"
 else
     yellow "⚠️ 未找到 arm64 核心下载链接"
 fi
 
 green "========================================="
-green "✅ AdGuardHome 源码替换完成"
-green "  - 自定义版已放入 feeds/luci/applications/ 和 package/"
-green "  - 分支: $BRANCH"
-green "  - 核心依赖已移除"
-green "  - 核心已预置（如成功下载）"
-green "  - 重要: 现在运行 'make defconfig' 确认配置，然后正常编译"
+green "✅ 所有操作完成"
+green "  - 自定义版已强制覆盖 feeds 和 package"
+green "  - PKG_VERSION 已修改为 v1.8-kongfl888"
+green "  - 核心已预置（如成功）"
+green ""
+yellow "⚠️ 重要：请立即执行以下命令以生效："
+yellow "  1. make defconfig"
+yellow "  2. make package/luci-app-adguardhome/compile V=s"
+yellow "  检查编译日志中的 'PKG_VERSION' 是否为 v1.8-kongfl888"
 green "========================================="
 exit 0

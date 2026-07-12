@@ -1,8 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# AdGuardHome 源码拉取 (kongfl888 版) + 核心预置
-# 不强制指定包格式，由 OpenWrt 构建系统自动决定 (ipk/apk)
+
 
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
@@ -15,7 +14,12 @@ clone_adg() {
     local pkg_name="luci-app-adguardhome"
     local repo_name="${repo#*/}"
 
-    # 清理旧目录（界面 + 核心）
+    # 1. 卸载 feeds 中的官方包（避免索引残留）
+    echo "正在卸载 feeds 中的官方包 ..."
+    ./scripts/feeds uninstall "$pkg_name" 2>/dev/null || true
+    ./scripts/feeds uninstall "adguardhome" 2>/dev/null || true
+
+    # 2. 彻底删除所有相关目录（feeds 和 package 中）
     for name in "$pkg_name" "adguardhome"; do
         find feeds/luci/ feeds/packages/ package/ -maxdepth 3 -type d -iname "*$name*" -exec rm -rf {} + 2>/dev/null || true
         [[ -d "$name" ]] && rm -rf "$name"
@@ -23,6 +27,7 @@ clone_adg() {
 
     mkdir -p package
 
+    # 3. 克隆 kongfl888 版本
     echo "正在克隆 $pkg_name (https://github.com/$repo.git 分支 $branch) ..."
     if ! git clone --depth=1 --single-branch --branch "$branch" "https://github.com/$repo.git" "package/$repo_name"; then
         red "❌ 克隆失败，尝试使用默认分支 master"
@@ -32,7 +37,7 @@ clone_adg() {
         fi
     fi
 
-    # 移除核心依赖（避免编译时再次下载核心）
+    # 4. 移除核心依赖（避免编译时再次下载核心）
     local makefile="package/$repo_name/Makefile"
     if [[ -f "$makefile" ]]; then
         # 移除 +adguardhome 及其后的依赖项
@@ -46,7 +51,7 @@ clone_adg() {
         yellow "⚠️ Makefile 不存在，请检查仓库结构"
     fi
 
-    # 清理 feeds 索引（避免冲突）
+    # 5. 清理 feeds 索引中残留的 Makefile 引用（防御性）
     find feeds/luci/ -maxdepth 2 -type f -name "Makefile" -exec grep -l "PKG_NAME:=luci-app-adguardhome" {} \; 2>/dev/null | while read -r idx; do
         sed -i '/^define Package\/luci-app-adguardhome/,/^endef/d' "$idx"
         sed -i '/^PKG_NAME:=luci-app-adguardhome/d' "$idx"
@@ -58,7 +63,7 @@ clone_adg() {
 
 # ---------- 主流程 ----------
 green "========================================="
-green "AdGuardHome 源码拉取 (kongfl888) + 核心预置"
+green "AdGuardHome 源码替换 (官方 → kongfl888)"
 green "包格式由 OpenWrt 构建配置自动选择"
 green "========================================="
 
@@ -86,13 +91,11 @@ else
 fi
 
 green "========================================="
-green "✅ AdGuardHome 源码 + 核心准备完成"
-green "  - 仓库: kongfl888/luci-app-adguardhome"
+green "✅ AdGuardHome 源码替换完成"
+green "  - 官方源码已移除，kongfl888 版已克隆"
 green "  - 分支: $BRANCH"
 green "  - 核心依赖已移除"
 green "  - 核心已预置（如成功下载）"
-green "  - 包格式: 由 .config 中的 CONFIG_PACKAGE_FORMAT_* 决定"
-green "  - 编译命令: make package/luci-app-adguardhome/compile V=s"
-green "  - 注意：.config 配置由 Settings.sh 负责"
+
 green "========================================="
 exit 0

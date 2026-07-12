@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 + AdGuardHome 强制启用（界面 + 核心包）
+# IPQ60XX NSS 加速 + 系统配置（不含 AdGuardHome 强制启用，由 GENERAL.txt 控制）
 
 set -eo pipefail
 
@@ -112,27 +112,14 @@ set_config "CONFIG_KERNEL_PREEMPT" "n"
 
 green "✅ 用户定制包配置完成"
 
-# ---- 4. 私有配置注入 ----
-[ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ] && { green "📂 加载私有配置"; cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config; }
+# ---- 4. 通用配置注入（GENERAL.txt） ----
+[ -f "$GITHUB_WORKSPACE/Config/GENERAL.txt" ] && { green "📂 加载通用配置"; cat "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> ./.config; }
 [ -n "$WRT_PACKAGE" ] && { green "📦 追加自定义包"; echo -e "$WRT_PACKAGE" >> ./.config; }
 
 # ---- 5. defconfig 补全依赖 ----
 green "=== 5. defconfig 补全依赖 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
-
-# ===================== 强制启用 AdGuardHome（界面 + 核心包） =====================
-green "=== 强制启用 AdGuardHome（界面 + 核心包） ==="
-# 启用界面
-sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome=/d" ./.config
-echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
-# 启用核心包
-sed -i "/^CONFIG_PACKAGE_adguardhome=/d" ./.config
-sed -i "/^# CONFIG_PACKAGE_adguardhome/d" ./.config
-echo "CONFIG_PACKAGE_adguardhome=y" >> ./.config
-# 再次运行 defconfig 吸收新配置
-make defconfig > /dev/null 2>&1
-green "✅ AdGuardHome 界面 + 核心包已强制启用"
 
 # ---- 6. uci-defaults 系统配置（用户定制） ----
 green "=== 6. 系统默认配置 ==="
@@ -381,24 +368,6 @@ done
 
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
-# ===================== 校验 AdGuardHome 配置（界面 + 核心包） =====================
-if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
-    green "✅ luci-app-adguardhome 已启用"
-else
-    red "❌ luci-app-adguardhome 未启用，重新强制写入..."
-    sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome=/d" ./.config
-    echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> ./.config
-fi
-
-if grep -q "^CONFIG_PACKAGE_adguardhome=y" ./.config 2>/dev/null; then
-    green "✅ adguardhome 核心包已启用"
-else
-    red "❌ adguardhome 核心包未启用，重新强制写入..."
-    sed -i "/^CONFIG_PACKAGE_adguardhome=/d" ./.config
-    sed -i "/^# CONFIG_PACKAGE_adguardhome/d" ./.config
-    echo "CONFIG_PACKAGE_adguardhome=y" >> ./.config
-fi
-
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
 # ---- 完成 ----
@@ -413,5 +382,5 @@ green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
 green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
 green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
-green "  ✅ AdGuardHome 界面 + 核心包均已强制启用"
+green "  ✅ 用户配置已从 GENERAL.txt 加载（含 AdGuardHome 设置）"
 green "========================================="

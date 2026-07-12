@@ -2,18 +2,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-# ===================== 自动切换到 OpenWRT 根目录 =====================
-if [[ -f "feeds.conf.default" ]]; then
-    :
-elif [[ -f "../feeds.conf.default" ]]; then
-    cd ..
-elif [[ -f "../../feeds.conf.default" ]]; then
-    cd ../..
-else
-    echo "❌ 错误：找不到 feeds.conf.default"
-    exit 1
-fi
-echo "📍 当前工作目录：$(pwd)"
 
 # ===================== 颜色输出 =====================
 if ! type green &>/dev/null; then

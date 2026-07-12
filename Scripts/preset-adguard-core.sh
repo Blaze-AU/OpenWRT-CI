@@ -78,7 +78,7 @@ if ! clone_adg "stevenjoezhang/luci-app-adguardhome" "$LATEST_TAG"; then
 fi
 
 # 3. 尝试 feeds install（忽略失败）
-./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
+#./scripts/feeds install luci-app-adguardhome 2>/dev/null || true
 
 # 4. 预置核心（arm64）
 green "=== 预置 AdGuardHome 核心 ==="

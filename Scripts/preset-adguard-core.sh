@@ -1,33 +1,23 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# 拉取 kongfl888 版到 package/ 下，并重命名包名，避免与官方冲突
 
-set -e  # 遇到错误立即退出
+set -e
 
 # ---------- 颜色输出 ----------
 red()    { echo -e "\033[31m$*\033[0m"; }
 green()  { echo -e "\033[32m$*\033[0m"; }
 yellow() { echo -e "\033[33m$*\033[0m"; }
 
-# ---------- Git 稀疏克隆 ----------
-git_sparse_clone() {
-    branch="$1" repourl="$2" && shift 2
-    git clone --depth=1 -b "$branch" --single-branch --filter=blob:none --sparse "$repourl"
-    repodir=$(basename "$repourl" .git)
-    cd "$repodir"
-    git sparse-checkout set "$@"
-    # 将需要的文件/目录移动到 package 下
-    for item in "$@"; do
-        if [ -e "$item" ]; then
-            mv -f "$item" "../package/"
-        else
-            yellow "⚠️ 稀疏克隆未找到 $item，跳过"
-        fi
-    done
-    cd ..
-    rm -rf "$repodir"
-}
+# ---------- 切换到 OpenWrt 根目录 ----------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OPENWRT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$OPENWRT_ROOT" || { red "❌ 无法进入 OpenWrt 根目录"; exit 1; }
+if [ ! -f "scripts/feeds" ]; then
+    red "❌ 当前目录不是 OpenWrt 源码根目录（缺少 scripts/feeds）"
+    exit 1
+fi
+green "当前工作目录: $(pwd)"
 
 # ---------- 主流程 ----------
 green "========================================="
@@ -43,20 +33,16 @@ rm -f feeds/luci.index feeds/packages.index
 
 # 2. 克隆并重命名
 green "📦 克隆 kongfl888/luci-app-adguardhome (master 分支)..."
-# 假设仓库目录结构为 luci-app-adguardhome/ 整个应用
 git clone --depth=1 -b master https://github.com/kongfl888/luci-app-adguardhome package/luci-app-adguardhome-tmp
-
-# 重命名目录
 mv package/luci-app-adguardhome-tmp package/luci-app-adguardhome-kong
 
-# 3. 修改 Makefile 中的包名（如果存在）
+# 3. 修改 Makefile 中的包名
 MAKEFILE="package/luci-app-adguardhome-kong/Makefile"
 if [ -f "$MAKEFILE" ]; then
-    # 将 PKG_NAME 改为 luci-app-adguardhome-kong，同时保留版本号等
-    sed -i 's/^PKG_NAME:=.*/PKG_NAME:=luci-app-adguardhome-kong/' "$MAKEFILE"
+    sed -i 's/^PKG_NAME\s*:=.*/PKG_NAME:=luci-app-adguardhome-kong/' "$MAKEFILE"
     green "✅ 已修改 Makefile 中的 PKG_NAME"
 else
-    yellow "⚠️ Makefile 不存在，请手动检查包名"
+    yellow "⚠️ Makefile 不存在，请手动检查"
 fi
 
 # 4. 更新 feeds
@@ -64,10 +50,9 @@ green "🔄 更新 feeds..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 5. 预置 AdGuardHome 核心（arm64）
+# 5. 预置核心（arm64）
 green "⬇️ 预置 AdGuardHome 核心（arm64）..."
 mkdir -p files/usr/bin
-# 使用 jq 解析 JSON（需安装 jq），若无则用 grep 兼容方案
 if command -v jq >/dev/null 2>&1; then
     AGH_URL=$(curl -sL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | jq -r '.assets[] | select(.name | test("linux_arm64")) | .browser_download_url' | head -1)
 else

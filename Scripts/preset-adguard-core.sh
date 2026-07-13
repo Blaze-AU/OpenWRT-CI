@@ -33,8 +33,8 @@ green "✅ 切换到 OpenWrt 根目录: $OPENWRT_ROOT"
 
 # ---------- 主流程 ----------
 green "========================================="
-green "AdGuardHome 自定义包（stevenjoezhang 版）"
-green "包名改为 luci-app-adguardhome-kong（可自定义）"
+green "AdGuardHome 自定义包（stevenjoezhang 版 v1.19）"
+green "包名改为 luci-app-adguardhome-kong"
 green "========================================="
 
 # 1. 清理旧克隆目录
@@ -42,9 +42,9 @@ green "🧹 清理旧克隆目录..."
 rm -rf package/luci-app-adguardhome-tmp
 rm -rf package/luci-app-adguardhome-kong
 
-# 2. 克隆并重命名（更换为 stevenjoezhang 仓库）
-green "📦 克隆 stevenjoezhang/luci-app-adguardhome (master 分支)..."
-git clone --depth=1 -b master https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome-tmp
+# 2. 克隆指定 tag（v1.19）
+green "📦 克隆 stevenjoezhang/luci-app-adguardhome (tag: v1.19)..."
+git clone --depth=1 -b v1.19 https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome-tmp
 mv package/luci-app-adguardhome-tmp package/luci-app-adguardhome-kong
 
 # 3. 修改 Makefile
@@ -66,7 +66,7 @@ if grep -q '^PKG_VERSION\s*:=' "$MAKEFILE"; then
     green "✅ 已修正 PKG_VERSION: $OLD_VER -> $NEW_VER"
 else
     yellow "⚠️ 未找到 PKG_VERSION，将添加默认版本"
-    echo 'PKG_VERSION:=1.9' >> "$MAKEFILE"
+    echo 'PKG_VERSION:=1.19' >> "$MAKEFILE"
 fi
 
 if grep -q '^PKG_RELEASE\s*:=' "$MAKEFILE"; then
@@ -82,7 +82,7 @@ else
     green "✅ 已添加 PKG_RELEASE:=1"
 fi
 
-# 4. 更新 feeds（必须在删除官方包之前，否则会被恢复）
+# 4. 更新 feeds
 green "🔄 更新 feeds..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
@@ -113,7 +113,7 @@ fi
 
 green "========================================="
 green "✅ 准备完成"
-green "  - 自定义包: luci-app-adguardhome-kong (来自 stevenjoezhang)"
+green "  - 自定义包: luci-app-adguardhome-kong (来自 stevenjoezhang v1.19)"
 green "  - 官方包已从 feeds 中移除"
 green "  - 请在 .config 中启用："
 green "    CONFIG_PACKAGE_luci-app-adguardhome-kong=y"

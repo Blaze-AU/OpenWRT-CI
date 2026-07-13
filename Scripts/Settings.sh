@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 + 系统配置（AdGuardHome 强制绑定自定义包）
+# IPQ60XX NSS 加速 + 系统配置（AdGuardHome 强制绑定自定义包，禁用 USB，CPU 调速器）
 
 set -eo pipefail
 
@@ -43,7 +43,7 @@ set_config() {
 
 # ===================== 主流程 =====================
 green "========================================="
-green "IPQ60XX NSS 加速 - LibWrt main-nss 精简版"
+green "IPQ60XX NSS 加速 - 精简优化增强版"
 green "========================================="
 
 # ---- 1. 静态源码修改（用户定制） ----
@@ -100,9 +100,34 @@ set_pkg luci-app-nss 2>/dev/null || true
 
 # ---- 3.5 禁用 SQM 队列（关键：与 NSS 硬件加速冲突） ----
 green "=== 3.5 禁用 SQM 队列 ==="
-# 显式禁用 SQM 相关包（LibWrt feeds 中包含 sqm_scripts_nss）
 disable_pkg sqm-scripts luci-app-sqm sqm-scripts-nss
 set_config "CONFIG_PACKAGE_sqm-scripts-nss" "n"
+
+# ---- 3.6 禁用 USB 相关包（减少固件体积） ----
+green "=== 3.6 禁用 USB 相关包 ==="
+disable_pkg \
+    kmod-usb-core \
+    kmod-usb3 \
+    kmod-usb-storage \
+    kmod-usb-storage-extras \
+    kmod-usb-storage-uas \
+    kmod-usb-dwc3 \
+    kmod-usb-dwc3-qcom \
+    kmod-usb-xhci-hcd \
+    kmod-usb-common \
+    kmod-usb-roles \
+    block-mount \
+    automount \
+    f2fs-tools \
+    e2fsprogs \
+    ntfs3-mount \
+    mkf2fs \
+    losetup
+
+# 强制禁用 USB 核心（注释方式，防止被依赖拉回）
+force_disable_pkg kmod-usb-core kmod-usb-storage
+
+green "✅ USB 相关包已禁用"
 
 # ---- 内核抢占模型（覆盖默认值） ----
 sed -i '/^CONFIG_KERNEL_PREEMPT_/d' ./.config
@@ -118,17 +143,8 @@ green "✅ 用户定制包配置完成"
 
 # ---- 4.5 强制绑定 AdGuardHome 自定义包（在 defconfig 之前） ----
 green "=== 强制绑定 AdGuardHome 自定义包 ==="
-# 禁用官方包（界面 + 核心）
-for pkg in luci-app-adguardhome adguardhome; do
-    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" ./.config
-    sed -i "/^# CONFIG_PACKAGE_${pkg}/d" ./.config
-done
-echo "CONFIG_PACKAGE_luci-app-adguardhome=n" >> ./.config
-echo "CONFIG_PACKAGE_adguardhome=n" >> ./.config
-
-# 启用自定义包
-sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome-kong=/d" ./.config
-echo "CONFIG_PACKAGE_luci-app-adguardhome-kong=y" >> ./.config
+disable_pkg luci-app-adguardhome adguardhome
+set_pkg luci-app-adguardhome-kong
 green "✅ 已强制绑定：luci-app-adguardhome-kong=y，官方包已禁用"
 
 # ---- 5. defconfig 补全依赖 ----
@@ -210,6 +226,41 @@ uci commit wireless
 exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/93-wifi-config
+
+# 96-cpufreq（CPU 调速器配置：schedutil → ondemand 回退） - 新增
+cat > ./package/base-files/files/etc/uci-defaults/96-cpufreq << 'EOF'
+#!/bin/sh
+# CPU 调速器配置
+# 优先使用 schedutil，若不可用则回退到 ondemand
+# ============================================================================
+
+for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
+    [ -d "$cpu" ] || continue
+    gov_file="$cpu/cpufreq/scaling_governor"
+    avail_file="$cpu/cpufreq/scaling_available_governors"
+    [ -f "$gov_file" ] || continue
+    
+    if [ -f "$avail_file" ] && grep -q "schedutil" "$avail_file" 2>/dev/null; then
+        echo "schedutil" > "$gov_file" 2>/dev/null && \
+            echo "✅ CPU ${cpu##*/}: schedutil" || \
+            echo "⚠️ CPU ${cpu##*/}: schedutil 设置失败"
+    elif [ -f "$avail_file" ] && grep -q "ondemand" "$avail_file" 2>/dev/null; then
+        echo "ondemand" > "$gov_file" 2>/dev/null && \
+            echo "✅ CPU ${cpu##*/}: ondemand (回退)" || \
+            echo "⚠️ CPU ${cpu##*/}: ondemand 设置失败"
+    else
+        # 如果两者都不可用，尝试直接设置（部分内核可能只有 performance/powersave）
+        if [ -f "$avail_file" ]; then
+            first_gov=$(head -n1 "$avail_file" 2>/dev/null)
+            [ -n "$first_gov" ] && echo "$first_gov" > "$gov_file" 2>/dev/null
+        fi
+    fi
+done
+
+exit 0
+EOF
+chmod +x ./package/base-files/files/etc/uci-defaults/96-cpufreq
+green "✅ 96-cpufreq: CPU 调速器配置（schedutil → ondemand 回退）"
 
 # 94-iptv-config（双物理口：LAN3 专属IPTV）
 cat > ./package/base-files/files/etc/uci-defaults/94-iptv-config << 'EOF'
@@ -368,7 +419,7 @@ fi
 green "=== 10. 校验 ==="
 ERRORS=0
 
-# 仅检查用户定制包（LibWrt 原生 NSS 不检查）
+# 检查用户定制包
 for pkg in igmpproxy udpxy luci-app-udpxy; do
     grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config || { yellow "⚠️ 用户包 ${pkg} 未选中"; }
 done
@@ -381,38 +432,41 @@ for pkg in sqm-scripts luci-app-sqm sqm-scripts-nss; do
     fi
 done
 
+# 检查中文语言包
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
+
+# 检查 AdGuardHome 自定义包绑定
+if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome-kong=y" ./.config; then
+    green "✅ luci-app-adguardhome-kong 已启用"
+else
+    yellow "⚠️ luci-app-adguardhome-kong 未启用，将在最终确认步骤重新设置"
+fi
+
+if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
+    red "❌ 官方 luci-app-adguardhome 仍启用"
+    ERRORS=$((ERRORS + 1))
+fi
 
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
 # ---- 11. 最终确认 AdGuardHome 自定义包（再次确保配置稳定） ----
 green "=== 11. 最终确认 AdGuardHome 自定义包 ==="
-# 再次强制写入，防止被后续操作覆盖
-for pkg in luci-app-adguardhome adguardhome; do
-    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" ./.config
-    sed -i "/^# CONFIG_PACKAGE_${pkg}/d" ./.config
-done
-echo "CONFIG_PACKAGE_luci-app-adguardhome=n" >> ./.config
-echo "CONFIG_PACKAGE_adguardhome=n" >> ./.config
-
-sed -i "/^CONFIG_PACKAGE_luci-app-adguardhome-kong=/d" ./.config
-echo "CONFIG_PACKAGE_luci-app-adguardhome-kong=y" >> ./.config
-
-# 最后一次运行 defconfig，确保依赖正确解析
+disable_pkg luci-app-adguardhome adguardhome
+set_pkg luci-app-adguardhome-kong
 make defconfig > /dev/null 2>&1
 green "✅ 最终确认：luci-app-adguardhome-kong=y，官方包已禁用"
 
 # ---- 完成 ----
 green ""
 green "========================================="
-green "✅ 精简优化版执行完成"
+green "✅ 精简优化增强版执行完成"
 green "========================================="
 green "核心功能："
-green "  ✅ 仅添加 LibWrt 未包含的 IPTV/用户定制"
 green "  ✅ 云浮电信 IPTV 双物理口 (LAN3)"
 green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
-green "  ✅ 禁用 SQM 队列（sqm-scripts / sqm-scripts-nss）"
-green "  ✅ 移除了与 LibWrt 原生 NSS 冲突的所有冗余操作"
-green "  ✅ 已强制绑定自定义 AdGuardHome 包 (luci-app-adguardhome-kong)"
+green "  ✅ 禁用 SQM / USB 相关包，减少固件体积"
+green "  ✅ CPU 调速器配置（schedutil → ondemand 回退）"
+green "  ✅ 强制绑定自定义 AdGuardHome 包 (luci-app-adguardhome-kong)"
+green "  ✅ 保留 LibWrt 原生 NSS 完整支持"
 green "========================================="

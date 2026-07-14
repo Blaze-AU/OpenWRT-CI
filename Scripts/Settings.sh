@@ -129,13 +129,7 @@ force_disable_pkg kmod-usb-core kmod-usb-storage
 
 green "✅ USB 相关包已禁用"
 
-# ---- 内核抢占模型（覆盖默认值） ----
-sed -i '/^CONFIG_KERNEL_PREEMPT_/d' ./.config
-set_config "CONFIG_KERNEL_PREEMPT_VOLUNTARY" "y"
-set_config "CONFIG_KERNEL_PREEMPT_NONE" "n"
-set_config "CONFIG_KERNEL_PREEMPT" "n"
 
-green "✅ 用户定制包配置完成"
 
 # ---- 4. 通用配置注入（GENERAL.txt） ----
 [ -f "$GITHUB_WORKSPACE/Config/GENERAL.txt" ] && { green "📂 加载通用配置"; cat "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> ./.config; }

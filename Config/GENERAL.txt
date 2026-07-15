@@ -60,6 +60,14 @@ CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
 CONFIG_PACKAGE_odhcpd=y
 CONFIG_PACKAGE_odhcpd-ipv6only=n
 
+# ==================== IPTV 组播与代理 ====================
+CONFIG_PACKAGE_igmpproxy=y
+CONFIG_PACKAGE_luci-app-igmpproxy=y
+CONFIG_PACKAGE_kmod-igmp=y
+CONFIG_PACKAGE_ip-full=y
+CONFIG_PACKAGE_udpxy=y
+CONFIG_PACKAGE_luci-app-udpxy=y
+
 # ==================== 禁用 SQM（与 NSS 硬件加速冲突） ====================
 CONFIG_PACKAGE_sqm-scripts-nss=n
 

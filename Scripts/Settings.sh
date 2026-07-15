@@ -82,7 +82,6 @@ set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 # 中文语言
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 
-
 # ---- 4. 禁用冲突包 ----
 green "=== 4. 禁用冲突包 ==="
 disable_pkg sqm-scripts luci-app-sqm
@@ -123,8 +122,8 @@ green "=== 8. 内核配置优化 ==="
 set_config "CONFIG_CPU_FREQ_GOV_SCHEDUTIL" "y"
 set_config "CONFIG_CPU_FREQ_GOV_ONDEMAND" "y"
 set_config "CONFIG_GCC_VERSION_14" "y"
-set_config "CONFIG_LTO" "y"
-green "✅ CPU调速器 + GCC14/LTO 已启用"
+# LTO 已移除（使用 LibWrt 默认配置）
+green "✅ CPU调速器 + GCC14 已启用"
 
 # ---- 9. uci-defaults 动态配置 ----
 green "=== 9. 系统默认配置（uci-defaults） ==="
@@ -392,7 +391,8 @@ green "  ✅ IPTV 双物理口 (LAN3) 完整方案（含 luci-app-igmpproxy）"
 green "  ✅ 主题 luci-theme-aurora（含 else 回退）"
 green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ USB / SQM 彻底禁用"
-green "  ✅ CPU 调速器 schedutil/ondemand + GCC14/LTO"
+green "  ✅ CPU 调速器 schedutil/ondemand + GCC14"
 green "  ✅ AdGuardHome 强制绑定 luci-app-adguardhome-kong"
 green "  ✅ uci-defaults 优先级高于 LibWrt default-settings"
+green "  ✅ NSS 固件版本: LibWrt 默认"
 green "========================================="

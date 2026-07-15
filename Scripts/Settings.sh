@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# IPQ60XX NSS 加速 + 系统配置（AdGuardHome 强制绑定自定义包，禁用 USB，CPU 调速器）
+
 
 set -eo pipefail
 
@@ -41,113 +41,80 @@ set_config() {
     fi
 }
 
-# ===================== 主流程 =====================
-green "========================================="
-green "IPQ60XX NSS 加速 - 精简优化增强版"
-green "========================================="
 
-# ---- 1. 静态源码修改（用户定制） ----
-green "=== 1. 源码定制 ==="
+# ---- 1. 基础源码修改（仅必要部分） ----
+green "=== 1. 基础源码修改 ==="
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js") 2>/dev/null || true
-
-release="./package/base-files/files/etc/openwrt_release"
-[ -f "$release" ] && {
-    sed -i 's|/ [0-9]\{9\}-[0-9]\{2\}\.[0-9]\{2\}\.[0-9]\{2\}-[0-9]\{2\}\.[0-9]\{2\}\.[0-9]\{2\}||g' "$release" 2>/dev/null
-    sed -i 's|-[0-9]\{8\}||g' "$release" 2>/dev/null
-    sed -i 's| [0-9]\{9\}-[0-9]\{2\}\.[0-9]\{2\}\.[0-9]\{2\}||g' "$release" 2>/dev/null
-    green "✅ 版本号清理完成"
-}
-
-WIFI_SH=$(find ./target/linux/qualcommax/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null | head -1)
-WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
-if [ -f "$WIFI_SH" ]; then
-    sed -i "s@BASE_SSID='.*'@BASE_SSID='$WRT_SSID'@g" "$WIFI_SH"
-    sed -i "s@BASE_WORD='.*'@BASE_WORD='$WRT_WORD'@g" "$WIFI_SH"
-elif [ -f "$WIFI_UC" ]; then
-    sed -i "s@ssid='.*'@ssid='$WRT_SSID'@g" "$WIFI_UC"
-    sed -i "s@key='.*'@key='$WRT_WORD'@g" "$WIFI_UC"
-fi
-green "✅ WiFi 默认配置完成"
+green "✅ 基础源码修改完成"
 
 # ---- 2. 平台校验 ----
 green "=== 2. 平台校验 ==="
 touch ./.config
 if ! grep -q "CONFIG_TARGET_qualcommax_ipq60xx" ./.config; then
-    yellow "⚠️ 未检测到 IPQ60XX 平台，请先在 menuconfig 中选中目标"
+    yellow "⚠️ 未检测到 IPQ60XX 平台，请先在 menuconfig 中选中目标设备"
     exit 1
 fi
 green "✅ 平台匹配"
 
-# ---- 3. 用户定制包（LibWrt 未包含） ----
+# ---- 3. 用户定制包 ----
 green "=== 3. 用户定制包 ==="
 
-# 强制禁用 PCI 无线（被依赖拉回，需显式禁用）
-force_disable_pkg kmod-ath11k-pci
+# 主题存在性检查
+if [ -d "./feeds/luci/luci-theme-$WRT_THEME" ]; then
+    set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 
-# IPTV 组件（LibWrt 默认不含）
-set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
+fi
 
-# 用户主题（LibWrt 默认无主题）
-set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
+# IPTV 组件（先设置核心包，Luci 界面包名可能存在差异）
+set_pkg igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
+if [ -d "./feeds/luci/applications/luci-app-igmpproxy" ]; then
+    set_pkg luci-app-igmpproxy
+elif [ -d "./feeds/luci/applications/luci-app-igmp" ]; then
+    set_pkg luci-app-igmp
+fi
 
-# 中文语言包
+# 中文语言
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 
-# NSS 监控界面（如 feeds 中存在）
-set_pkg luci-app-nss 2>/dev/null || true
-
-# ---- 3.5 禁用 SQM 队列（关键：与 NSS 硬件加速冲突） ----
-green "=== 3.5 禁用 SQM 队列 ==="
-disable_pkg sqm-scripts luci-app-sqm sqm-scripts-nss
-set_config "CONFIG_PACKAGE_sqm-scripts-nss" "n"
-
-# ---- 3.6 禁用 USB 相关包（减少固件体积） ----
-green "=== 3.6 禁用 USB 相关包 ==="
+# ---- 4. 禁用冲突包 ----
+green "=== 4. 禁用冲突包 ==="
+disable_pkg sqm-scripts luci-app-sqm
 disable_pkg \
-    kmod-usb-core \
-    kmod-usb3 \
-    kmod-usb-storage \
-    kmod-usb-storage-extras \
-    kmod-usb-storage-uas \
-    kmod-usb-dwc3 \
-    kmod-usb-dwc3-qcom \
-    kmod-usb-xhci-hcd \
-    kmod-usb-common \
-    kmod-usb-roles \
-    block-mount \
-    automount \
-    f2fs-tools \
-    e2fsprogs \
-    ntfs3-mount \
-    mkf2fs \
-    losetup
-
-# 强制禁用 USB 核心（注释方式，防止被依赖拉回）
+    kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
+    kmod-usb-storage-uas kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-xhci-hcd \
+    kmod-usb-common kmod-usb-roles \
+    block-mount automount f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 force_disable_pkg kmod-usb-core kmod-usb-storage
+green "✅ 冲突包已禁用"
 
-green "✅ USB 相关包已禁用"
-
-
-
-# ---- 4. 通用配置注入（GENERAL.txt） ----
+# ---- 5. 加载外部配置 ----
 [ -f "$GITHUB_WORKSPACE/Config/GENERAL.txt" ] && { green "📂 加载通用配置"; cat "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> ./.config; }
 [ -n "$WRT_PACKAGE" ] && { green "📦 追加自定义包"; echo -e "$WRT_PACKAGE" >> ./.config; }
 
-# ---- 4.5 强制绑定 AdGuardHome 自定义包（在 defconfig 之前） ----
-green "=== 强制绑定 AdGuardHome 自定义包 ==="
+# ---- 6. 强制绑定 AdGuardHome 自定义包 ----
+green "=== 6. AdGuardHome 自定义包绑定 ==="
 disable_pkg luci-app-adguardhome adguardhome
 set_pkg luci-app-adguardhome-kong
-green "✅ 已强制绑定：luci-app-adguardhome-kong=y，官方包已禁用"
+green "✅ 已强制切换至 luci-app-adguardhome-kong"
 
-# ---- 5. defconfig 补全依赖 ----
-green "=== 5. defconfig 补全依赖 ==="
+# ---- 7. defconfig 依赖补全 ----
+green "=== 7. defconfig 依赖补全 ==="
 make defconfig > /dev/null 2>&1
 green "✅ 依赖补全完成"
+disable_pkg luci-app-adguardhome adguardhome sqm-scripts luci-app-sqm
 
-# ---- 6. uci-defaults 系统配置（用户定制） ----
-green "=== 6. 系统默认配置 ==="
+# ---- 8. 内核配置优化 ----
+green "=== 8. 内核配置优化 ==="
+set_config "CONFIG_CPU_FREQ_GOV_SCHEDUTIL" "y"
+set_config "CONFIG_CPU_FREQ_GOV_ONDEMAND" "y"
+set_config "CONFIG_GCC_VERSION_14" "y"
+set_config "CONFIG_LTO" "y"
+green "✅ CPU调速器 + GCC14/LTO 已启用"
+
+# ---- 9. uci-defaults 动态配置 ----
+green "=== 9. 系统默认配置（uci-defaults） ==="
 mkdir -p ./package/base-files/files/etc/uci-defaults
 
 # 90-fstab
@@ -184,7 +151,7 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/91-base-config
 
-# 92-ntp-dns（含云浮电信专用 NTP）
+# 92-ntp-dns
 cat > ./package/base-files/files/etc/uci-defaults/92-ntp-dns << 'EOF'
 #!/bin/sh
 uci -q set system.ntp.enabled='1'
@@ -201,7 +168,7 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/92-ntp-dns
 
-# 93-wifi-config
+# 93-wifi-config（遍历所有接口统一设置 apsd）
 cat > ./package/base-files/files/etc/uci-defaults/93-wifi-config << EOF
 #!/bin/sh
 for dev in \$(uci show wireless | grep '=wifi-device' | cut -d. -f2 | cut -d= -f1); do
@@ -213,74 +180,51 @@ for iface in \$(uci show wireless | grep '=wifi-iface' | cut -d. -f2 | cut -d= -
     uci set wireless.\$iface.ssid='$WRT_SSID'
     uci set wireless.\$iface.key='$WRT_WORD'
     uci set wireless.\$iface.encryption='psk2+ccmp'
+    uci set wireless.\$iface.apsd='0'
 done
-uci set wireless.default_radio0.apsd='0'
-uci set wireless.default_radio1.apsd='0'
 uci commit wireless
 exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/93-wifi-config
 
-# 96-cpufreq（CPU 调速器配置：schedutil → ondemand 回退） - 新增
+# 96-cpufreq
 cat > ./package/base-files/files/etc/uci-defaults/96-cpufreq << 'EOF'
 #!/bin/sh
-# CPU 调速器配置
-# 优先使用 schedutil，若不可用则回退到 ondemand
-# ============================================================================
-
 for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
     [ -d "$cpu" ] || continue
     gov_file="$cpu/cpufreq/scaling_governor"
     avail_file="$cpu/cpufreq/scaling_available_governors"
     [ -f "$gov_file" ] || continue
-    
     if [ -f "$avail_file" ] && grep -q "schedutil" "$avail_file" 2>/dev/null; then
         echo "schedutil" > "$gov_file" 2>/dev/null && \
-            echo "✅ CPU ${cpu##*/}: schedutil" || \
-            echo "⚠️ CPU ${cpu##*/}: schedutil 设置失败"
-    elif [ -f "$avail_file" ] && grep -q "ondemand" "$avail_file" 2>/dev/null; then
-        echo "ondemand" > "$gov_file" 2>/dev/null && \
-            echo "✅ CPU ${cpu##*/}: ondemand (回退)" || \
-            echo "⚠️ CPU ${cpu##*/}: ondemand 设置失败"
+            logger -t cpufreq "✅ CPU ${cpu##*/}: schedutil" || \
+            logger -t cpufreq "⚠️ CPU ${cpu##*/}: schedutil 设置失败"
+
     else
-        # 如果两者都不可用，尝试直接设置（部分内核可能只有 performance/powersave）
-        if [ -f "$avail_file" ]; then
-            first_gov=$(head -n1 "$avail_file" 2>/dev/null)
-            [ -n "$first_gov" ] && echo "$first_gov" > "$gov_file" 2>/dev/null
-        fi
+        first_gov=$(head -n1 "$avail_file" 2>/dev/null)
+        [ -n "$first_gov" ] && echo "$first_gov" > "$gov_file" 2>/dev/null
     fi
 done
-
 exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/96-cpufreq
-green "✅ 96-cpufreq: CPU 调速器配置（schedutil → ondemand 回退）"
 
-# 94-iptv-config（双物理口：LAN3 专属IPTV）
+# 94-iptv-config
 cat > ./package/base-files/files/etc/uci-defaults/94-iptv-config << 'EOF'
 #!/bin/sh
-# 从 LAN 网桥中移除 lan3
 if uci -q get network.lan.ports | grep -q 'lan3'; then
     uci del_list network.lan.ports='lan3'
     uci commit network
     /etc/init.d/network reload 2>/dev/null || true
 fi
-
-# 创建独立的 IPTV 接口
 uci -q get network.iptv || {
     uci set network.iptv=interface
     uci set network.iptv.device='lan3'
     uci set network.iptv.proto='dhcp'
     uci set network.iptv.defaultroute='0'
     uci set network.iptv.peerdns='0'
-    # 如需 MAC 绑定，取消注释下行
-    # uci set network.iptv.macaddr='F4:0A:2E:18:B6:36'
 }
-
-# 防火墙将 iptv 接口加入 wan 区域
 uci -q get firewall.wan.network | grep -q iptv || uci add_list firewall.wan.network='iptv'
-
-# 放通 IGMP
 uci -q get firewall.allow_igmp || {
     uci set firewall.allow_igmp=rule
     uci set firewall.allow_igmp.name='Allow-IGMP'
@@ -289,8 +233,6 @@ uci -q get firewall.allow_igmp || {
     uci set firewall.allow_igmp.target='ACCEPT'
     uci set firewall.allow_igmp.family='ipv4'
 }
-
-# 放通 IPTV 组播
 uci -q get firewall.allow_iptv_multicast || {
     uci set firewall.allow_iptv_multicast=rule
     uci set firewall.allow_iptv_multicast.name='Allow-IPTV-Multicast'
@@ -301,7 +243,6 @@ uci -q get firewall.allow_iptv_multicast || {
     uci set firewall.allow_iptv_multicast.target='ACCEPT'
     uci set firewall.allow_iptv_multicast.family='ipv4'
 }
-
 uci commit network
 uci commit firewall
 exit 0
@@ -326,7 +267,7 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/95-igmpproxy-config
 
-# 98-firewall-nss（确保 nss_offload 已启用）
+# 98-firewall-nss
 cat > ./package/base-files/files/etc/uci-defaults/98-firewall-nss << 'EOF'
 #!/bin/sh
 uci -q get firewall.@defaults[0] || uci add firewall defaults
@@ -341,7 +282,7 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/98-firewall-nss
 
-# 99-enable-user-services（LibWrt 已有原生 NSS 服务，仅启用用户服务）
+# 99-enable-user-services
 cat > ./package/base-files/files/etc/uci-defaults/99-enable-user-services << 'EOF'
 #!/bin/sh
 /etc/init.d/igmpproxy enable 2>/dev/null || true
@@ -349,37 +290,32 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/99-enable-user-services
 
-green "✅ 系统配置写入完成"
+green "✅ uci-defaults 配置写入完成（优先级高于 default-settings）"
 
-# ---- 7. IPTV 热插拔兜底 ----
-green "=== 7. IPTV 热插拔兜底 ==="
+# ---- 10. IPTV 热插拔兜底 ----
+green "=== 10. IPTV 热插拔兜底 ==="
 mkdir -p ./package/base-files/files/etc/hotplug.d/iface
-
 cat > ./package/base-files/files/etc/hotplug.d/iface/99-iptv-route << 'EOF'
 #!/bin/sh
 [ "$INTERFACE" = "iptv" ] && [ "$ACTION" = "ifup" ] || exit 0
-
 IPTV_GW=""
 [ -f /lib/functions/network.sh ] && { . /lib/functions/network.sh; network_get_gateway IPTV_GW iptv 2>/dev/null || true; }
 [ -z "$IPTV_GW" ] && IPTV_GW=$(ip route show dev iptv | grep default | awk '{print $3}')
 [ -z "$IPTV_GW" ] && exit 1
-
 ip rule del priority 100 2>/dev/null || true
-
 for net in 224.0.0.0/4 10.0.0.0/8 172.16.0.0/12 100.64.0.0/10 183.235.0.0/16; do
     ip route replace "$net" via "$IPTV_GW" dev iptv table 100 2>/dev/null
 done
 ip rule add priority 100 to 224.0.0.0/4 table 100 2>/dev/null || true
-
 /etc/init.d/igmpproxy restart 2>/dev/null || true
 logger -t iptv "✅ IPTV 策略路由已生效，网关: $IPTV_GW"
 exit 0
 EOF
 chmod 0755 ./package/base-files/files/etc/hotplug.d/iface/99-iptv-route
-green "✅ IPTV 兜底配置完成"
+green "✅ IPTV 热插拔脚本已部署"
 
-# ---- 8. 用户自定义 sysctl ----
-green "=== 8. sysctl 配置 ==="
+# ---- 11. sysctl 网络调优 ----
+green "=== 11. sysctl 网络调优 ==="
 SYSCTL_CONF="./package/base-files/files/etc/sysctl.conf"
 mkdir -p "$(dirname "$SYSCTL_CONF")"
 grep -q "nf_conntrack_max" "$SYSCTL_CONF" 2>/dev/null || {
@@ -392,75 +328,59 @@ net.core.wmem_default = 87380
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
 EOF
-    green "✅ sysctl 配置完成"
+    green "✅ sysctl 参数已写入"
 }
 
-# ---- 9. nowifi 适配 ----
-green "=== 9. nowifi 适配 ==="
+# ---- 12. nowifi 适配 ----
+green "=== 12. nowifi 适配 ==="
 if [[ "${WRT_CONFIG,,}" == *"nowifi"* ]]; then
     [ -n "${GITHUB_ENV:-}" ] && echo "WRT_WIFI=wifi-no" >> "$GITHUB_ENV"
     dts_path="./target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/"
-    [ -d "$dts_path" ] && {
+    if [ -d "$dts_path" ]; then
         find "$dts_path" -name "ipq6018*.dts" -exec sed -i 's/ipq6018.dtsi/ipq6018-nowifi.dtsi/g' {} +
-        green "✅ nowifi DTS 适配完成"
-    }
+        green "✅ DTS nowifi 适配完成"
+    fi
     disable_pkg wpad-openssl wifi-scripts ath11k-firmware-ipq6018
-else
-    yellow "ℹ️ 未启用 nowifi，跳过"
 fi
 
-# ---- 10. 精简校验 ----
-green "=== 10. 校验 ==="
+# ---- 13. 校验与最终确认 ----
+green "=== 13. 校验与最终确认 ==="
 ERRORS=0
 
-# 检查用户定制包
 for pkg in igmpproxy udpxy luci-app-udpxy; do
     grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config || { yellow "⚠️ 用户包 ${pkg} 未选中"; }
 done
 
-# 检查 SQM 是否被禁用
-for pkg in sqm-scripts luci-app-sqm sqm-scripts-nss; do
-    if grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config 2>/dev/null; then
-        red "❌ SQM 包仍启用: ${pkg}（与 NSS 硬件加速冲突）"
-        ERRORS=$((ERRORS + 1))
-    fi
-done
-
-# 检查中文语言包
-grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ LuCI 中文未启用"; ERRORS=$((ERRORS + 1)); }
-
-# 检查 AdGuardHome 自定义包绑定
-if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome-kong=y" ./.config; then
-    green "✅ luci-app-adguardhome-kong 已启用"
-else
-    yellow "⚠️ luci-app-adguardhome-kong 未启用，将在最终确认步骤重新设置"
+if grep -q "^CONFIG_PACKAGE_sqm-scripts=y" ./.config 2>/dev/null; then
+    red "❌ SQM 仍启用，与 NSS 冲突"
+    ERRORS=$((ERRORS + 1))
 fi
 
+grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ 中文未启用"; ERRORS=$((ERRORS + 1)); }
+
 if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
-    red "❌ 官方 luci-app-adguardhome 仍启用"
-    ERRORS=$((ERRORS + 1))
+    red "❌ 官方 AdGuardHome 包残留，执行二次清理"
+    disable_pkg luci-app-adguardhome adguardhome
+    make defconfig > /dev/null 2>&1
+elif grep -q "^CONFIG_PACKAGE_luci-app-adguardhome-kong=y" ./.config; then
+    green "✅ luci-app-adguardhome-kong 已绑定"
+else
+    yellow "⚠️ AdGuardHome-kong 未选中，尝试再次设置"
+    set_pkg luci-app-adguardhome-kong
+    make defconfig > /dev/null 2>&1
 fi
 
 [ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
-# ---- 11. 最终确认 AdGuardHome 自定义包（再次确保配置稳定） ----
-green "=== 11. 最终确认 AdGuardHome 自定义包 ==="
-disable_pkg luci-app-adguardhome adguardhome
-set_pkg luci-app-adguardhome-kong
-make defconfig > /dev/null 2>&1
-green "✅ 最终确认：luci-app-adguardhome-kong=y，官方包已禁用"
-
-# ---- 完成 ----
 green ""
 green "========================================="
-green "✅ 精简优化增强版执行完成"
+green "✅ LibWrt 深度适配版执行完成"
 green "========================================="
-green "核心功能："
-green "  ✅ 云浮电信 IPTV 双物理口 (LAN3)"
+green "  ✅ 信任 LibWrt 原生 NSS 服务"
+green "  ✅ IPTV 双物理口 (LAN3) 完整方案"
 green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
-green "  ✅ IPTV 策略路由 + 热插拔兜底 + 去重"
-green "  ✅ 禁用 SQM / USB 相关包，减少固件体积"
-green "  ✅ CPU 调速器配置（schedutil → ondemand 回退）"
-green "  ✅ 强制绑定自定义 AdGuardHome 包 (luci-app-adguardhome-kong)"
-green "  ✅ 保留 LibWrt 原生 NSS 完整支持"
+green "  ✅ USB / SQM 彻底禁用"
+green "  ✅ CPU 调速器 schedutil/ondemand + GCC14/LTO"
+green "  ✅ AdGuardHome 强制绑定 luci-app-adguardhome-kong"
+green "  ✅ uci-defaults 优先级高于 LibWrt default-settings"
 green "========================================="

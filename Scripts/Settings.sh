@@ -50,9 +50,15 @@ green "========================================="
 
 # ---- 1. 基础源码修改（仅必要部分） ----
 green "=== 1. 基础源码修改 ==="
+# 移除升级助手
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
+# 修改默认主题
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
+# 修改默认IP
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js") 2>/dev/null || true
+# 移除编译日期标识
+sed -i 's/(\(luciversion || ''\))[^)]*)/(\1)/g' $(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js") 2>/dev/null || true
+
 green "✅ 基础源码修改完成"
 
 # ---- 2. 平台校验 ----
@@ -76,6 +82,7 @@ set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 # 中文语言
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 
+
 # ---- 4. 禁用冲突包 ----
 green "=== 4. 禁用冲突包 ==="
 disable_pkg sqm-scripts luci-app-sqm
@@ -87,9 +94,17 @@ disable_pkg \
 force_disable_pkg kmod-usb-core kmod-usb-storage
 green "✅ 冲突包已禁用"
 
-# ---- 5. 加载外部配置 ----
-[ -f "$GITHUB_WORKSPACE/Config/GENERAL.txt" ] && { green "📂 加载通用配置"; cat "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> ./.config; }
-[ -n "$WRT_PACKAGE" ] && { green "📦 追加自定义包"; echo -e "$WRT_PACKAGE" >> ./.config; }
+# ---- 5. 引入私有扩展配置 ----
+if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
+    green "📂 加载私有配置: PRIVATE.txt"
+    cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
+fi
+
+# 手动调整的插件
+if [ -n "$WRT_PACKAGE" ]; then
+    green "📦 追加自定义包"
+    echo -e "$WRT_PACKAGE" >> ./.config
+fi
 
 # ---- 6. 强制绑定 AdGuardHome 自定义包 ----
 green "=== 6. AdGuardHome 自定义包绑定 ==="
@@ -99,7 +114,7 @@ green "✅ 已强制切换至 luci-app-adguardhome-kong"
 
 # ---- 7. defconfig 依赖补全 ----
 green "=== 7. defconfig 依赖补全 ==="
-make defconfig > /dev/null 2>&1
+make defconfig > /dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
 green "✅ 依赖补全完成"
 disable_pkg luci-app-adguardhome adguardhome sqm-scripts luci-app-sqm
 
@@ -115,8 +130,8 @@ green "✅ CPU调速器 + GCC14/LTO 已启用"
 green "=== 9. 系统默认配置（uci-defaults） ==="
 mkdir -p ./package/base-files/files/etc/uci-defaults
 
-# 90-fstab
-cat > ./package/base-files/files/etc/uci-defaults/90-fstab << 'EOF'
+# 所有脚本使用 99- 前缀确保更高优先级
+cat > ./package/base-files/files/etc/uci-defaults/99-fstab << 'EOF'
 #!/bin/sh
 uci -q get fstab.global || {
     uci set fstab.global=global
@@ -130,10 +145,9 @@ uci -q get fstab.global || {
 }
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/90-fstab
+chmod +x ./package/base-files/files/etc/uci-defaults/99-fstab
 
-# 91-base-config
-cat > ./package/base-files/files/etc/uci-defaults/91-base-config << EOF
+cat > ./package/base-files/files/etc/uci-defaults/99-base-config << EOF
 #!/bin/sh
 uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr='$WRT_IP'; uci commit network; }
 uci -q get system.@system[0].hostname || { uci set system.@system[0].hostname='$WRT_NAME'; uci commit system; }
@@ -147,10 +161,9 @@ uci commit network
 uci commit dhcp
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/91-base-config
+chmod +x ./package/base-files/files/etc/uci-defaults/99-base-config
 
-# 92-ntp-dns
-cat > ./package/base-files/files/etc/uci-defaults/92-ntp-dns << 'EOF'
+cat > ./package/base-files/files/etc/uci-defaults/99-ntp-dns << 'EOF'
 #!/bin/sh
 uci -q set system.ntp.enabled='1'
 uci -q set system.ntp.enable_server='0'
@@ -164,10 +177,9 @@ uci commit system
 uci commit dhcp
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/92-ntp-dns
+chmod +x ./package/base-files/files/etc/uci-defaults/99-ntp-dns
 
-# 93-wifi-config（遍历所有接口统一设置 apsd）
-cat > ./package/base-files/files/etc/uci-defaults/93-wifi-config << EOF
+cat > ./package/base-files/files/etc/uci-defaults/99-wifi-config << EOF
 #!/bin/sh
 for dev in \$(uci show wireless | grep '=wifi-device' | cut -d. -f2 | cut -d= -f1); do
     uci set wireless.\$dev.disabled='0'
@@ -183,10 +195,9 @@ done
 uci commit wireless
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/93-wifi-config
+chmod +x ./package/base-files/files/etc/uci-defaults/99-wifi-config
 
-# 96-cpufreq
-cat > ./package/base-files/files/etc/uci-defaults/96-cpufreq << 'EOF'
+cat > ./package/base-files/files/etc/uci-defaults/99-cpufreq << 'EOF'
 #!/bin/sh
 for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
     [ -d "$cpu" ] || continue
@@ -204,10 +215,9 @@ for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
 done
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/96-cpufreq
+chmod +x ./package/base-files/files/etc/uci-defaults/99-cpufreq
 
-# 94-iptv-config
-cat > ./package/base-files/files/etc/uci-defaults/94-iptv-config << 'EOF'
+cat > ./package/base-files/files/etc/uci-defaults/99-iptv-config << 'EOF'
 #!/bin/sh
 if uci -q get network.lan.ports | grep -q 'lan3'; then
     uci del_list network.lan.ports='lan3'
@@ -219,7 +229,7 @@ uci -q get network.iptv || {
     uci set network.iptv.device='lan3'
     uci set network.iptv.proto='dhcp'
     uci set network.iptv.defaultroute='0'
-    uci set network.iptv.peerdns='0'
+    uci set network.iptv.peerdns='1'
 }
 uci -q get firewall.wan.network | grep -q iptv || uci add_list firewall.wan.network='iptv'
 uci -q get firewall.allow_igmp || {
@@ -244,10 +254,9 @@ uci commit network
 uci commit firewall
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/94-iptv-config
+chmod +x ./package/base-files/files/etc/uci-defaults/99-iptv-config
 
-# 95-igmpproxy-config
-cat > ./package/base-files/files/etc/uci-defaults/95-igmpproxy-config << 'EOF'
+cat > ./package/base-files/files/etc/uci-defaults/99-igmpproxy-config << 'EOF'
 #!/bin/sh
 uci -q get igmpproxy.@igmpproxy[0] || { uci set igmpproxy.global=igmpproxy; uci set igmpproxy.global.quickleave='1'; }
 uci -q get igmpproxy.upstream || {
@@ -262,10 +271,9 @@ uci commit igmpproxy
 /etc/init.d/igmpproxy enable 2>/dev/null || true
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/95-igmpproxy-config
+chmod +x ./package/base-files/files/etc/uci-defaults/99-igmpproxy-config
 
-# 98-firewall-nss
-cat > ./package/base-files/files/etc/uci-defaults/98-firewall-nss << 'EOF'
+cat > ./package/base-files/files/etc/uci-defaults/99-firewall-nss << 'EOF'
 #!/bin/sh
 uci -q get firewall.@defaults[0] || uci add firewall defaults
 uci set firewall.@defaults[0].flow_offloading='0'
@@ -277,15 +285,14 @@ uci set firewall.@defaults[0].syn_flood='0'
 uci commit firewall
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/98-firewall-nss
+chmod +x ./package/base-files/files/etc/uci-defaults/99-firewall-nss
 
-# 99-enable-user-services
-cat > ./package/base-files/files/etc/uci-defaults/99-enable-user-services << 'EOF'
+cat > ./package/base-files/files/etc/uci-defaults/99-user-services << 'EOF'
 #!/bin/sh
 /etc/init.d/igmpproxy enable 2>/dev/null || true
 exit 0
 EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/99-enable-user-services
+chmod +x ./package/base-files/files/etc/uci-defaults/99-user-services
 
 green "✅ uci-defaults 配置写入完成（优先级高于 default-settings）"
 
@@ -317,13 +324,20 @@ SYSCTL_CONF="./package/base-files/files/etc/sysctl.conf"
 mkdir -p "$(dirname "$SYSCTL_CONF")"
 grep -q "nf_conntrack_max" "$SYSCTL_CONF" 2>/dev/null || {
     cat >> "$SYSCTL_CONF" << 'EOF'
+# 连接跟踪优化
 net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 30
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
 net.netfilter.nf_conntrack_max = 131072
+
+# TCP 缓冲区优化
 net.core.rmem_default = 87380
 net.core.wmem_default = 87380
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
+
+# TCP 内存自动调优
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
 EOF
     green "✅ sysctl 参数已写入"
 }

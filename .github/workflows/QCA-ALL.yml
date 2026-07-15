@@ -57,11 +57,11 @@ jobs:
       #默认密码，仅作提示，修改无用
       WRT_PW: 无
       # 源码链接替换为图片内地址
-      WRT_REPO: https://github.com/${{matrix.SOURCE}}/openwrt-6.x.git
+      WRT_REPO: https://github.com/${{matrix.SOURCE}}/LibWrt.git
       #源码分支
       WRT_BRANCH: ${{matrix.BRANCH}}
       #源码名称
-      WRT_SOURCE: ${{matrix.SOURCE}}/openwrt-6.x
+      WRT_SOURCE: ${{matrix.SOURCE}}/LibWrt
       #插件调整
       WRT_PACKAGE: ${{inputs.PACKAGE}}
       #仅输出配置文件

@@ -67,17 +67,8 @@ green "✅ 平台匹配"
 # ---- 3. 用户定制包 ----
 green "=== 3. 用户定制包 ==="
 
-# 主题存在性检查（含 else 回退）
-if [ -d "./feeds/luci/luci-theme-$WRT_THEME" ]; then
-    set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-else
-    green "⚠️ 主题 $WRT_THEME 不存在，回退至 argon"
-    set_pkg luci-theme-argon luci-app-argon-config
-fi
-# 二次确保主题相关包被选中（防止 defconfig 遗漏）
-if [ -d "./feeds/luci/luci-theme-$WRT_THEME" ]; then
-    set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-fi
+# 用户主题（LibWrt 默认无主题）
+set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 
 # IPTV 组件（含 luci-app-igmpproxy）
 set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy

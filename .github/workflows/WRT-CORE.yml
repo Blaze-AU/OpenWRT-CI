@@ -64,10 +64,10 @@ jobs:
     name: ${{inputs.WRT_SOURCE}}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Projects
+      - name: Checkout Projects  检出项目仓库（包含脚本和配置）
         uses: actions/checkout@main
 
-      - name: Initialization Environment
+      - name: Initialization Environment 初始化编译环境（安装依赖、挂载目录）
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -86,7 +86,7 @@ jobs:
           sudo chown $USER:$USER /mnt/build_wrt
           sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
 
-      - name: Initialization Values
+      - name: Initialization Values  初始化环境变量
         run: |
           echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
@@ -96,7 +96,7 @@ jobs:
           echo "WRT_KVER=none" >> $GITHUB_ENV
           echo "WRT_LIST=none" >> $GITHUB_ENV
 
-      - name: Clone Code
+      - name: Clone Code  克隆 OpenWrt 源码
         run: |
           git clone --depth=1 --single-branch --branch $WRT_BRANCH $WRT_REPO ./wrt/
 
@@ -108,11 +108,11 @@ jobs:
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
 
-      - name: Check Scripts
+      - name: Check Scripts  转换脚本格式并添加执行权限
         run: |
           find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
 
-      - name: Check Caches
+      - name: Check Caches  检查缓存（工具链等）
         id: check-cache
         if: env.WRT_TEST != 'true'
         uses: actions/cache@main
@@ -124,7 +124,7 @@ jobs:
             ./wrt/staging_dir/host*
             ./wrt/staging_dir/tool*
 
-      - name: Update Caches
+      - name: Update Caches  更新缓存标记
         if: env.WRT_TEST != 'true'
         run: |
           if [ -d "./wrt/staging_dir" ]; then
@@ -148,14 +148,14 @@ jobs:
             echo "caches cleanup done!"
           fi
 
-      - name: Update Feeds
+      - name: Update Feeds  更新 feeds 并安装全部软件包
         run: |
           cd ./wrt/
 
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Custom Packages
+      - name: Custom Packages  执行自定义包脚本
         run: |
           cd ./wrt/package/
 
@@ -163,7 +163,7 @@ jobs:
           $GITHUB_WORKSPACE/Scripts/Handles.sh
           $GITHUB_WORKSPACE/Scripts/preset-adguard-core.sh
           
-      - name: Custom Settings
+      - name: Custom Settings  合并配置并执行
         run: |
           cd ./wrt/
 
@@ -177,21 +177,21 @@ jobs:
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
-      - name: Download Packages
+      - name: Download Packages  下载所需源码包
         if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
 
           make download -j$(nproc)
 
-      - name: Compile Firmware
+      - name: Compile Firmware  编译固件
         if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
 
           make -j$(nproc) || make -j1 V=s
 
-      - name: Machine Information
+      - name: Machine Information  打印系统信息（CPU、磁盘）
         run: |
           cd ./wrt/
 
@@ -203,7 +203,7 @@ jobs:
           du -h --max-depth=1
           echo "======================="
 
-      - name: Package Firmware
+      - name: Package Firmware  打包固件
         run: |
           cd ./wrt/ && mkdir ./upload/
 
@@ -212,6 +212,13 @@ jobs:
           if [[ $WRT_TEST != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
             echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
+
+            COMMIT_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
+            {
+              echo "VERSION_INFO<<EOF"
+              echo "$COMMIT_INFO"
+              echo "EOF"
+            } >> $GITHUB_ENV
 
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
@@ -227,30 +234,30 @@ jobs:
             make clean -j$(nproc)
           fi
 
-      - name: Release Firmware
+      - name: Release Firmware 发布固件到
         uses: softprops/action-gh-release@master
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
           files: ./wrt/upload/*.*
           body: |
-            这是个平台固件包，内含多个设备！
-            请注意选择你需要的设备固件！
-            不要问，刷就完事了！
-
-            全系带开源硬件加速，别问了！
-
-            源码：${{env.WRT_REPO}}
-            分支：${{env.WRT_BRANCH}}
-            提交：${{env.WRT_HASH}}
-
-            配置：${{env.WRT_CONFIG}}
-            平台：${{env.WRT_TARGET}}
-
-            登录地址：${{env.WRT_IP}}
-            登录密码：${{env.WRT_PW}}
-
-            WIFI名称：${{env.WRT_SSID}}
-            WIFI密码：${{env.WRT_WORD}}
-
-            内核版本：${{env.WRT_KVER}}
-            插件列表：${{env.WRT_LIST}}
+            ### 📦 固件信息
+            - 🏷️ 配置名称：${{env.WRT_CONFIG}}
+            - 🎨 主题：${{env.WRT_THEME}}
+            - 📱 设备名称：${{env.WRT_NAME}}
+            - 💻 源码仓库：${{env.WRT_REPO}}
+            - 🌿 源码分支：${{env.WRT_BRANCH}}
+            - 🔖 提交哈希：${{env.WRT_HASH}}
+            - 🎯 目标平台：${{env.WRT_TARGET}}
+            
+            ### 🌐 网络设置
+            - 📍 默认IP：${{env.WRT_IP}}
+            - 🔑 登录密码：${{env.WRT_PW}}
+            - 📶 WiFi名称：${{env.WRT_SSID}}
+            - 🔐 WiFi密码：${{env.WRT_WORD}}
+            
+            ### 🧊 固件版本
+            - 🧩 内核版本：**${{ env.WRT_KVER }}**
+            - 📦 插件列表：${{ env.WRT_LIST }}
+            
+            ### 📝 源码更新记录
+            ${{ env.VERSION_INFO }}

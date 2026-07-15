@@ -1,7 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-
+# LibWrt 深度适配版 - IPQ60XX NSS 加速 + 系统配置
+# 源码: https://github.com/LiBwrt/LibWrt.git (25.12-nss)
 
 set -eo pipefail
 
@@ -41,6 +42,11 @@ set_config() {
     fi
 }
 
+# ===================== 主流程 =====================
+green "========================================="
+green "LibWrt IPQ60XX 深度适配版"
+green "源码: LiBwrt/LibWrt (25.12-nss)"
+green "========================================="
 
 # ---- 1. 基础源码修改（仅必要部分） ----
 green "=== 1. 基础源码修改 ==="
@@ -61,19 +67,20 @@ green "✅ 平台匹配"
 # ---- 3. 用户定制包 ----
 green "=== 3. 用户定制包 ==="
 
-# 主题存在性检查
+# 主题存在性检查（含 else 回退）
 if [ -d "./feeds/luci/luci-theme-$WRT_THEME" ]; then
     set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-
+else
+    green "⚠️ 主题 $WRT_THEME 不存在，回退至 argon"
+    set_pkg luci-theme-argon luci-app-argon-config
+fi
+# 二次确保主题相关包被选中（防止 defconfig 遗漏）
+if [ -d "./feeds/luci/luci-theme-$WRT_THEME" ]; then
+    set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 fi
 
-# IPTV 组件（先设置核心包，Luci 界面包名可能存在差异）
-set_pkg igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
-if [ -d "./feeds/luci/applications/luci-app-igmpproxy" ]; then
-    set_pkg luci-app-igmpproxy
-elif [ -d "./feeds/luci/applications/luci-app-igmp" ]; then
-    set_pkg luci-app-igmp
-fi
+# IPTV 组件（含 luci-app-igmpproxy）
+set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 
 # 中文语言
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
@@ -199,7 +206,6 @@ for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
         echo "schedutil" > "$gov_file" 2>/dev/null && \
             logger -t cpufreq "✅ CPU ${cpu##*/}: schedutil" || \
             logger -t cpufreq "⚠️ CPU ${cpu##*/}: schedutil 设置失败"
-
     else
         first_gov=$(head -n1 "$avail_file" 2>/dev/null)
         [ -n "$first_gov" ] && echo "$first_gov" > "$gov_file" 2>/dev/null
@@ -347,7 +353,7 @@ fi
 green "=== 13. 校验与最终确认 ==="
 ERRORS=0
 
-for pkg in igmpproxy udpxy luci-app-udpxy; do
+for pkg in igmpproxy luci-app-igmpproxy udpxy luci-app-udpxy; do
     grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config || { yellow "⚠️ 用户包 ${pkg} 未选中"; }
 done
 
@@ -377,7 +383,8 @@ green "========================================="
 green "✅ LibWrt 深度适配版执行完成"
 green "========================================="
 green "  ✅ 信任 LibWrt 原生 NSS 服务"
-green "  ✅ IPTV 双物理口 (LAN3) 完整方案"
+green "  ✅ IPTV 双物理口 (LAN3) 完整方案（含 luci-app-igmpproxy）"
+green "  ✅ 主题 luci-theme-aurora（含 else 回退）"
 green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
 green "  ✅ USB / SQM 彻底禁用"
 green "  ✅ CPU 调速器 schedutil/ondemand + GCC14/LTO"

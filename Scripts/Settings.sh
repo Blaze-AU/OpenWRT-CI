@@ -1,8 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# LibWrt 深度适配版 - IPQ60XX NSS 加速 + 系统配置
-# 源码: https://github.com/LiBwrt/LibWrt.git (25.12-nss)
 
 set -eo pipefail
 
@@ -42,11 +40,6 @@ set_config() {
     fi
 }
 
-# ===================== 主流程 =====================
-green "========================================="
-green "LibWrt IPQ60XX 深度适配版"
-green "源码: LiBwrt/LibWrt (25.12-nss)"
-green "========================================="
 
 # ---- 1. 基础源码修改（仅必要部分） ----
 green "=== 1. 基础源码修改 ==="
@@ -61,23 +54,9 @@ sed -i 's/(\(luciversion || ''\))[^)]*)/(\1)/g' $(find ./feeds/luci/modules/luci
 
 green "✅ 基础源码修改完成"
 
-# ---- 2. 平台校验 ----
-green "=== 2. 平台校验 ==="
-touch ./.config
-if ! grep -q "CONFIG_TARGET_qualcommax_ipq60xx" ./.config; then
-    yellow "⚠️ 未检测到 IPQ60XX 平台，请先在 menuconfig 中选中目标设备"
-    exit 1
-fi
-green "✅ 平台匹配"
-
-# ---- 3. 用户定制包 ----
-green "=== 3. 用户定制包 ==="
 
 # 用户主题（LibWrt 默认无主题）
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-
-# IPTV 组件（含 luci-app-igmpproxy）
-set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
 
 # 中文语言
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
@@ -105,12 +84,6 @@ if [ -n "$WRT_PACKAGE" ]; then
     echo -e "$WRT_PACKAGE" >> ./.config
 fi
 
-# ---- 6. 强制绑定 AdGuardHome 自定义包 ----
-green "=== 6. AdGuardHome 自定义包绑定 ==="
-disable_pkg luci-app-adguardhome adguardhome
-set_pkg luci-app-adguardhome-kong
-green "✅ 已强制切换至 luci-app-adguardhome-kong"
-
 # ---- 7. defconfig 依赖补全 ----
 green "=== 7. defconfig 依赖补全 ==="
 make defconfig > /dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
@@ -122,29 +95,13 @@ green "=== 8. 内核配置优化 ==="
 set_config "CONFIG_CPU_FREQ_GOV_SCHEDUTIL" "y"
 set_config "CONFIG_CPU_FREQ_GOV_ONDEMAND" "y"
 set_config "CONFIG_GCC_VERSION_14" "y"
-# LTO 已移除（使用 LibWrt 默认配置）
 green "✅ CPU调速器 + GCC14 已启用"
 
-# ---- 9. uci-defaults 动态配置 ----
+# ---- 9. 系统默认配置（uci-defaults） ----
 green "=== 9. 系统默认配置（uci-defaults） ==="
 mkdir -p ./package/base-files/files/etc/uci-defaults
 
 # 所有脚本使用 99- 前缀确保更高优先级
-cat > ./package/base-files/files/etc/uci-defaults/99-fstab << 'EOF'
-#!/bin/sh
-uci -q get fstab.global || {
-    uci set fstab.global=global
-    uci set fstab.global.anon_swap='0'
-    uci set fstab.global.anon_mount='0'
-    uci set fstab.global.auto_swap='1'
-    uci set fstab.global.auto_mount='1'
-    uci set fstab.global.delay_root='5'
-    uci set fstab.global.check_fs='0'
-    uci commit fstab
-}
-exit 0
-EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/99-fstab
 
 cat > ./package/base-files/files/etc/uci-defaults/99-base-config << EOF
 #!/bin/sh
@@ -161,22 +118,6 @@ uci commit dhcp
 exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/99-base-config
-
-cat > ./package/base-files/files/etc/uci-defaults/99-ntp-dns << 'EOF'
-#!/bin/sh
-uci -q set system.ntp.enabled='1'
-uci -q set system.ntp.enable_server='0'
-uci -q delete system.ntp.server
-uci -q add_list system.ntp.server='cn.ntp.org.cn'
-uci -q add_list system.ntp.server='183.235.3.59'
-uci -q add_list system.ntp.server='183.235.19.59'
-uci commit system
-! uci -q get dhcp.@dnsmasq[0].rebind_domain | grep -q 'cn.ntp.org.cn' && \
-    uci -q add_list dhcp.@dnsmasq[0].rebind_domain='cn.ntp.org.cn'
-uci commit dhcp
-exit 0
-EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/99-ntp-dns
 
 cat > ./package/base-files/files/etc/uci-defaults/99-wifi-config << EOF
 #!/bin/sh
@@ -216,62 +157,6 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/99-cpufreq
 
-cat > ./package/base-files/files/etc/uci-defaults/99-iptv-config << 'EOF'
-#!/bin/sh
-if uci -q get network.lan.ports | grep -q 'lan3'; then
-    uci del_list network.lan.ports='lan3'
-    uci commit network
-    /etc/init.d/network reload 2>/dev/null || true
-fi
-uci -q get network.iptv || {
-    uci set network.iptv=interface
-    uci set network.iptv.device='lan3'
-    uci set network.iptv.proto='dhcp'
-    uci set network.iptv.defaultroute='0'
-    uci set network.iptv.peerdns='1'
-}
-uci -q get firewall.wan.network | grep -q iptv || uci add_list firewall.wan.network='iptv'
-uci -q get firewall.allow_igmp || {
-    uci set firewall.allow_igmp=rule
-    uci set firewall.allow_igmp.name='Allow-IGMP'
-    uci set firewall.allow_igmp.src='wan'
-    uci set firewall.allow_igmp.proto='igmp'
-    uci set firewall.allow_igmp.target='ACCEPT'
-    uci set firewall.allow_igmp.family='ipv4'
-}
-uci -q get firewall.allow_iptv_multicast || {
-    uci set firewall.allow_iptv_multicast=rule
-    uci set firewall.allow_iptv_multicast.name='Allow-IPTV-Multicast'
-    uci set firewall.allow_iptv_multicast.src='wan'
-    uci set firewall.allow_iptv_multicast.proto='udp'
-    uci set firewall.allow_iptv_multicast.dest='lan'
-    uci set firewall.allow_iptv_multicast.dest_ip='224.0.0.0/4'
-    uci set firewall.allow_iptv_multicast.target='ACCEPT'
-    uci set firewall.allow_iptv_multicast.family='ipv4'
-}
-uci commit network
-uci commit firewall
-exit 0
-EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/99-iptv-config
-
-cat > ./package/base-files/files/etc/uci-defaults/99-igmpproxy-config << 'EOF'
-#!/bin/sh
-uci -q get igmpproxy.@igmpproxy[0] || { uci set igmpproxy.global=igmpproxy; uci set igmpproxy.global.quickleave='1'; }
-uci -q get igmpproxy.upstream || {
-    uci set igmpproxy.upstream=phyint
-    uci set igmpproxy.upstream.network='iptv'
-    uci set igmpproxy.upstream.direction='upstream'
-    uci add_list igmpproxy.upstream.altnet='0.0.0.0/0'
-}
-uci -q get igmpproxy.downstream || { uci set igmpproxy.downstream=phyint; uci set igmpproxy.downstream.network='lan'; uci set igmpproxy.downstream.direction='downstream'; }
-uci -q get igmpproxy.loopback || { uci set igmpproxy.loopback=phyint; uci set igmpproxy.loopback.network='loopback'; uci set igmpproxy.loopback.direction='disabled'; }
-uci commit igmpproxy
-/etc/init.d/igmpproxy enable 2>/dev/null || true
-exit 0
-EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/99-igmpproxy-config
-
 cat > ./package/base-files/files/etc/uci-defaults/99-firewall-nss << 'EOF'
 #!/bin/sh
 uci -q get firewall.@defaults[0] || uci add firewall defaults
@@ -286,36 +171,17 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/99-firewall-nss
 
-cat > ./package/base-files/files/etc/uci-defaults/99-user-services << 'EOF'
-#!/bin/sh
-/etc/init.d/igmpproxy enable 2>/dev/null || true
-exit 0
-EOF
-chmod +x ./package/base-files/files/etc/uci-defaults/99-user-services
-
 green "✅ uci-defaults 配置写入完成（优先级高于 default-settings）"
 
-# ---- 10. IPTV 热插拔兜底 ----
-green "=== 10. IPTV 热插拔兜底 ==="
-mkdir -p ./package/base-files/files/etc/hotplug.d/iface
-cat > ./package/base-files/files/etc/hotplug.d/iface/99-iptv-route << 'EOF'
-#!/bin/sh
-[ "$INTERFACE" = "iptv" ] && [ "$ACTION" = "ifup" ] || exit 0
-IPTV_GW=""
-[ -f /lib/functions/network.sh ] && { . /lib/functions/network.sh; network_get_gateway IPTV_GW iptv 2>/dev/null || true; }
-[ -z "$IPTV_GW" ] && IPTV_GW=$(ip route show dev iptv | grep default | awk '{print $3}')
-[ -z "$IPTV_GW" ] && exit 1
-ip rule del priority 100 2>/dev/null || true
-for net in 224.0.0.0/4 10.0.0.0/8 172.16.0.0/12 100.64.0.0/10 183.235.0.0/16; do
-    ip route replace "$net" via "$IPTV_GW" dev iptv table 100 2>/dev/null
-done
-ip rule add priority 100 to 224.0.0.0/4 table 100 2>/dev/null || true
-/etc/init.d/igmpproxy restart 2>/dev/null || true
-logger -t iptv "✅ IPTV 策略路由已生效，网关: $IPTV_GW"
-exit 0
-EOF
-chmod 0755 ./package/base-files/files/etc/hotplug.d/iface/99-iptv-route
-green "✅ IPTV 热插拔脚本已部署"
+# ---- 10. IPTV 独立配置（按需加载） ----
+green "=== 10. IPTV 独立配置 ==="
+if [ -f "$GITHUB_WORKSPACE/OpenWRT-CI/Scripts/iptv.sh" ]; then
+    green "📺 加载 IPTV 配置模块"
+    source "$GITHUB_WORKSPACE/OpenWRT-CI/Scripts/iptv.sh"
+    setup_iptv
+else
+    yellow "ℹ️ 未找到 IPTV 配置脚本（Config/iptv.sh），跳过 IPTV 功能"
+fi
 
 # ---- 11. sysctl 网络调优 ----
 green "=== 11. sysctl 网络调优 ==="
@@ -357,17 +223,16 @@ fi
 green "=== 13. 校验与最终确认 ==="
 ERRORS=0
 
-for pkg in igmpproxy luci-app-igmpproxy udpxy luci-app-udpxy; do
-    grep -q "^CONFIG_PACKAGE_${pkg}=y" ./.config || { yellow "⚠️ 用户包 ${pkg} 未选中"; }
-done
-
+# 检查 SQM 是否已禁用（必须）
 if grep -q "^CONFIG_PACKAGE_sqm-scripts=y" ./.config 2>/dev/null; then
     red "❌ SQM 仍启用，与 NSS 冲突"
     ERRORS=$((ERRORS + 1))
 fi
 
+# 检查中文语言
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
+# 检查 AdGuardHome 绑定
 if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
     red "❌ 官方 AdGuardHome 包残留，执行二次清理"
     disable_pkg luci-app-adguardhome adguardhome
@@ -380,19 +245,9 @@ else
     make defconfig > /dev/null 2>&1
 fi
 
-[ $ERRORS -eq 0 ] && green "🎉 所有检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
+[ $ERRORS -eq 0 ] && green "🎉 所有核心检查通过" || { red "❌ 存在 ${ERRORS} 项错误"; exit 1; }
 
 green ""
 green "========================================="
-green "✅ LibWrt 深度适配版执行完成"
-green "========================================="
-green "  ✅ 信任 LibWrt 原生 NSS 服务"
-green "  ✅ IPTV 双物理口 (LAN3) 完整方案（含 luci-app-igmpproxy）"
-green "  ✅ 主题 luci-theme-aurora（含 else 回退）"
-green "  ✅ 云浮电信专用 NTP（183.235.3.59 / 19.59）"
-green "  ✅ USB / SQM 彻底禁用"
-green "  ✅ CPU 调速器 schedutil/ondemand + GCC14"
-green "  ✅ AdGuardHome 强制绑定 luci-app-adguardhome-kong"
-green "  ✅ uci-defaults 优先级高于 LibWrt default-settings"
-green "  ✅ NSS 固件版本: LibWrt 默认"
+green "✅ 执行完成"
 green "========================================="

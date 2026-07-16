@@ -6,7 +6,7 @@ setup_iptv() {
     green "  --- IPTV 模块配置开始 ---"
 
     # 1. 安装 IPTV 相关包
-    set_pkg igmpproxy luci-app-igmpproxy kmod-igmp ip-full udpxy luci-app-udpxy
+    set_pkg igmpproxy luci-app-igmpproxy kmod-igmp udpxy luci-app-udpxy
 
     # 2. 创建 uci-defaults 配置文件
     mkdir -p ./package/base-files/files/etc/uci-defaults

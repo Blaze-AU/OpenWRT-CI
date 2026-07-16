@@ -37,11 +37,12 @@ set_config() {
         sed -i "s@^# ${key} is not set@${key}=${value}@g" ./.config
     else
         echo "${key}=${value}" >> ./.config
-    fi
+    done
 }
 
-
-# ---- 1. 基础源码修改（仅必要部分） ----
+# ====================================================
+# 1. 基础源码修改（仅必要部分）
+# ====================================================
 green "=== 1. 基础源码修改 ==="
 # 移除升级助手
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
@@ -51,57 +52,112 @@ sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/coll
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js") 2>/dev/null || true
 # 移除编译日期标识
 sed -i 's/(\(luciversion || ''\))[^)]*)/(\1)/g' $(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js") 2>/dev/null || true
-
 green "✅ 基础源码修改完成"
 
-
+# ====================================================
+# 2. 所有包选择与禁用（集中处理）
+# ====================================================
+green "=== 2. 包选择与禁用 ==="
 # 用户主题（LibWrt 默认无主题）
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 
 # 中文语言
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 
-# ---- 4. 禁用冲突包 ----
-green "=== 4. 禁用冲突包 ==="
-disable_pkg sqm-scripts luci-app-sqm
+# 禁用 USB 相关（避免依赖冲突）
 disable_pkg \
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
     kmod-usb-storage-uas kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-xhci-hcd \
     kmod-usb-common kmod-usb-roles \
     block-mount automount f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 force_disable_pkg kmod-usb-core kmod-usb-storage
-green "✅ 冲突包已禁用"
 
-# ---- 5. 引入私有扩展配置 ----
+# 禁用 SQM（与 NSS 冲突）
+disable_pkg sqm-scripts luci-app-sqm
+
+# Nowifi 模式下额外禁用无线包（若启用）
+if [[ "${WRT_CONFIG,,}" == *"nowifi"* ]]; then
+    disable_pkg wpad-openssl wifi-scripts ath11k-firmware-ipq6018
+fi
+
+green "✅ 包配置完成"
+
+# ====================================================
+# 3. 私有配置与自定义包
+# ====================================================
 if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
     green "📂 加载私有配置: PRIVATE.txt"
     cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
 fi
 
-# 手动调整的插件
 if [ -n "$WRT_PACKAGE" ]; then
     green "📦 追加自定义包"
     echo -e "$WRT_PACKAGE" >> ./.config
 fi
 
-# ---- 7. defconfig 依赖补全 ----
-green "=== 7. defconfig 依赖补全 ==="
-make defconfig > /dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
-green "✅ 依赖补全完成"
-disable_pkg luci-app-adguardhome adguardhome sqm-scripts luci-app-sqm
-
-# ---- 8. 内核配置优化 ----
-green "=== 8. 内核配置优化 ==="
+# ====================================================
+# 4. 内核配置优化（必须在 defconfig 前）
+# ====================================================
+green "=== 4. 内核配置优化 ==="
 set_config "CONFIG_CPU_FREQ_GOV_SCHEDUTIL" "y"
 set_config "CONFIG_CPU_FREQ_GOV_ONDEMAND" "y"
 set_config "CONFIG_GCC_VERSION_14" "y"
 green "✅ CPU调速器 + GCC14 已启用"
 
-# ---- 9. 系统默认配置（uci-defaults） ----
+# ====================================================
+# 5. Nowifi DTS 适配（仅修改设备树）
+# ====================================================
+if [[ "${WRT_CONFIG,,}" == *"nowifi"* ]]; then
+    green "=== 5. Nowifi DTS 适配 ==="
+    [ -n "${GITHUB_ENV:-}" ] && echo "WRT_WIFI=wifi-no" >> "$GITHUB_ENV"
+    dts_path="./target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/"
+    if [ -d "$dts_path" ]; then
+        find "$dts_path" -name "ipq6018*.dts" -exec sed -i 's/ipq6018.dtsi/ipq6018-nowifi.dtsi/g' {} +
+        green "✅ DTS nowifi 适配完成"
+    fi
+fi
+
+# ====================================================
+# 6. IPTV 独立配置（按需加载）
+# ====================================================
+green "=== 6. IPTV 独立配置 ==="
+if [ -f "$GITHUB_WORKSPACE/Scripts/iptv.sh" ]; then
+    green "📺 加载 IPTV 配置模块"
+    source "$GITHUB_WORKSPACE/Scripts/iptv.sh"
+    setup_iptv
+else
+    yellow "ℹ️ 未找到 IPTV 配置脚本（Config/iptv.sh），跳过 IPTV 功能"
+fi
+
+# ====================================================
+# 7. defconfig 依赖补全（第一次）
+# ====================================================
+green "=== 7. defconfig 依赖补全（第一次） ==="
+make defconfig > /dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
+green "✅ 依赖补全完成"
+
+# ====================================================
+# 8. 二次清理（防止依赖导致意外启用）
+# ====================================================
+green "=== 8. 二次清理（确保 SQM 等彻底禁用） ==="
+# 再次禁用可能被依赖拉起的冲突包
+disable_pkg sqm-scripts luci-app-sqm
+# 若官方 AdGuardHome 被意外启用，则替换为 kong 版本
+if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
+    red "⚠️ 官方 AdGuardHome 被依赖启用，强制替换为 kong 版"
+    disable_pkg luci-app-adguardhome adguardhome
+    set_pkg luci-app-adguardhome-kong
+fi
+
+# 重新执行 defconfig 固化上述修改
+make defconfig > /dev/null 2>&1 || { red "❌ 二次 defconfig 失败"; exit 1; }
+green "✅ 二次固化完成"
+
+# ====================================================
+# 9. 系统默认配置（uci-defaults）
+# ====================================================
 green "=== 9. 系统默认配置（uci-defaults） ==="
 mkdir -p ./package/base-files/files/etc/uci-defaults
-
-# 所有脚本使用 99- 前缀确保更高优先级
 
 cat > ./package/base-files/files/etc/uci-defaults/99-base-config << EOF
 #!/bin/sh
@@ -173,18 +229,11 @@ chmod +x ./package/base-files/files/etc/uci-defaults/99-firewall-nss
 
 green "✅ uci-defaults 配置写入完成（优先级高于 default-settings）"
 
-# ---- 10. IPTV 独立配置（按需加载） ----
-green "=== 10. IPTV 独立配置 ===" 
-if [ -f "$GITHUB_WORKSPACE/Scripts/iptv.sh" ]; then
-    green "📺 加载 IPTV 配置模块"
-    source "$GITHUB_WORKSPACE/Scripts/iptv.sh"
-    setup_iptv
-else
-    yellow "ℹ️ 未找到 IPTV 配置脚本（Config/iptv.sh），跳过 IPTV 功能"
-fi
 
-# ---- 11. sysctl 网络调优 ----
-green "=== 11. sysctl 网络调优 ==="
+# ====================================================
+# 10. sysctl 网络调优
+# ====================================================
+green "=== 10. sysctl 网络调优 ==="
 SYSCTL_CONF="./package/base-files/files/etc/sysctl.conf"
 mkdir -p "$(dirname "$SYSCTL_CONF")"
 grep -q "nf_conntrack_max" "$SYSCTL_CONF" 2>/dev/null || {
@@ -207,20 +256,10 @@ EOF
     green "✅ sysctl 参数已写入"
 }
 
-# ---- 12. nowifi 适配 ----
-green "=== 12. nowifi 适配 ==="
-if [[ "${WRT_CONFIG,,}" == *"nowifi"* ]]; then
-    [ -n "${GITHUB_ENV:-}" ] && echo "WRT_WIFI=wifi-no" >> "$GITHUB_ENV"
-    dts_path="./target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/"
-    if [ -d "$dts_path" ]; then
-        find "$dts_path" -name "ipq6018*.dts" -exec sed -i 's/ipq6018.dtsi/ipq6018-nowifi.dtsi/g' {} +
-        green "✅ DTS nowifi 适配完成"
-    fi
-    disable_pkg wpad-openssl wifi-scripts ath11k-firmware-ipq6018
-fi
-
-# ---- 13. 校验与最终确认 ----
-green "=== 13. 校验与最终确认 ==="
+# ====================================================
+# 11. 最终校验
+# ====================================================
+green "=== 11. 最终校验 ==="
 ERRORS=0
 
 # 检查 SQM 是否已禁用（必须）
@@ -233,12 +272,8 @@ fi
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" ./.config || { red "❌ 中文未启用"; ERRORS=$((ERRORS + 1)); }
 
 # 检查 AdGuardHome 绑定
-if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome=y" ./.config 2>/dev/null; then
-    red "❌ 官方 AdGuardHome 包残留，执行二次清理"
-    disable_pkg luci-app-adguardhome adguardhome
-    make defconfig > /dev/null 2>&1
-elif grep -q "^CONFIG_PACKAGE_luci-app-adguardhome-kong=y" ./.config; then
-    green "✅ luci-app-adguardhome-kong 已绑定"
+if grep -q "^CONFIG_PACKAGE_luci-app-adguardhome-kong=y" ./.config; then
+    green "✅ luci-app-adguardhome-kong 已正确绑定"
 else
     yellow "⚠️ AdGuardHome-kong 未选中，尝试再次设置"
     set_pkg luci-app-adguardhome-kong

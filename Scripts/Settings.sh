@@ -72,26 +72,27 @@ disable_pkg \
 force_disable_pkg kmod-usb-core kmod-usb-storage
 green "✅ 冲突包已禁用"
 
-# ---- 6. IPTV 独立配置（按需加载） ----
-green "=== 6. IPTV 独立配置 ===" 
+
+# ---- 5. 引入私有扩展配置 ----
+if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
+    green "📂 加载私有配置: PRIVATE.txt"
+    cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
+fi
+
+#---- 6. 手动调整的插件
+if [ -n "$WRT_PACKAGE" ]; then
+    green "📦 追加自定义包"
+    echo -e "$WRT_PACKAGE" >> ./.config
+fi
+
+# ---- 7. IPTV 独立配置（按需加载） ----
+green "=== 7. IPTV 独立配置 ===" 
 if [ -f "$GITHUB_WORKSPACE/Scripts/iptv.sh" ]; then
     green "📺 加载 IPTV 配置模块"
     source "$GITHUB_WORKSPACE/Scripts/iptv.sh"
     setup_iptv
 else
     yellow "ℹ️ 未找到 IPTV 配置脚本（Config/iptv.sh），跳过 IPTV 功能"
-fi
-
-# ---- 7. 引入私有扩展配置 ----
-if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
-    green "📂 加载私有配置: PRIVATE.txt"
-    cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
-fi
-
-# 手动调整的插件
-if [ -n "$WRT_PACKAGE" ]; then
-    green "📦 追加自定义包"
-    echo -e "$WRT_PACKAGE" >> ./.config
 fi
 
 # ---- 8. defconfig 依赖补全 ----

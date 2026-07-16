@@ -174,10 +174,10 @@ chmod +x ./package/base-files/files/etc/uci-defaults/99-firewall-nss
 green "✅ uci-defaults 配置写入完成（优先级高于 default-settings）"
 
 # ---- 10. IPTV 独立配置（按需加载） ----
-green "=== 10. IPTV 独立配置 ==="
-if [ -f "$GITHUB_WORKSPACE/OpenWRT-CI/Scripts/iptv.sh" ]; then
+green "=== 10. IPTV 独立配置 ===" 
+if [ -f "$GITHUB_WORKSPACE/Scripts/iptv.sh" ]; then
     green "📺 加载 IPTV 配置模块"
-    source "$GITHUB_WORKSPACE/OpenWRT-CI/Scripts/iptv.sh"
+    source "$GITHUB_WORKSPACE/Scripts/iptv.sh"
     setup_iptv
 else
     yellow "ℹ️ 未找到 IPTV 配置脚本（Config/iptv.sh），跳过 IPTV 功能"

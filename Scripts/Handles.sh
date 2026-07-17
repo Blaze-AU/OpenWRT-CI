@@ -2,37 +2,66 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-# 工作目录统一：openwrt源码根目录
-OPENWRT_ROOT="$PWD"
-# 自定义插件包路径（仓库根目录wrt/package）
-PKG_PATH="$GITHUB_WORKSPACE/wrt/package/"
-
-echo -e "\n==================== Start Custom DIY Script ====================\n"
-
-# ===================== 1. 固化 Argon 主题默认配置（主色 #5e72e4） =====================
-if ls ${PKG_PATH} | grep -q "luci-theme-argon"; then
-    echo "[DIY] 开始固化 Argon 主题配色/壁纸/字体，主色调 #5e72e4"
-    cd ${PKG_PATH}/luci-theme-argon || exit 0
-    sed -i "s/primary '.*'/primary '#5e72e4'/; s/'0.2'/'0.5'/; s/'none'/'bing'/; s/'600'/'normal'/" ./luci-app-argon-config/root/etc/config/argon
-    echo "[DIY] Argon 主题参数固化完成"
-    cd ${OPENWRT_ROOT}
+if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "$GITHUB_WORKSPACE/wrt/package" ]; then
+	PKG_PATH="$GITHUB_WORKSPACE/wrt/package"
+else
+	PKG_PATH="$(pwd)"
 fi
 
-# ===================== 2. 强制 Aurora 下拉导航菜单 =====================
-if ls ${PKG_PATH} | grep -q "luci-app-aurora-config"; then
-    echo -e "\n[DIY] 设置 Aurora 默认下拉菜单"
-    cd ${PKG_PATH}/luci-app-aurora-config || exit 0
-    find ./root/usr/share/aurora/ -type f -name "*.template" -exec sed -i "s/nav_type '.*'/nav_type 'dropdown'/g" {} \;
-    echo "[DIY] Aurora 菜单样式固化完成"
-    cd ${OPENWRT_ROOT}
+#修改argon主题字体和颜色
+if [ -d "$PKG_PATH/luci-theme-argon" ]; then
+	echo " "
+	if sed -i "s/primary '.*'/primary '#31a1a1'/; s/'0.2'/'0.5'/; s/'none'/'bing'/; s/'600'/'normal'/" \
+		"$PKG_PATH/luci-theme-argon/luci-app-argon-config/root/etc/config/argon"; then
+		echo "theme-argon has been fixed!"
+	else
+		echo "theme-argon fix failed; continuing!"
+	fi
 fi
 
-# ===================== 3. 修复 Rust 编译 LLVM 内存溢出 =====================
-RUST_FILE=$(find ${OPENWRT_ROOT}/feeds/packages/ -maxdepth 3 -type f -path "*/rust/Makefile")
-if [ -f "${RUST_FILE}" ]; then
-    echo -e "\n[DIY] 关闭 Rust CI LLVM 避免编译失败"
-    sed -i 's/ci-llvm=true/ci-llvm=false/g' "${RUST_FILE}"
-    echo "[DIY] Rust 编译修复完成"
+#修改aurora菜单式样
+if [ -d "$PKG_PATH/luci-app-aurora-config" ]; then
+	echo " "
+	if find "$PKG_PATH/luci-app-aurora-config/root/usr/share/aurora/" -type f -name '*.template' -exec \
+		sed -i "s/nav_type '.*'/nav_type 'dropdown'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" {} +; then
+		echo "theme-aurora has been fixed!"
+	else
+		echo "theme-aurora fix failed; continuing!"
+	fi
 fi
 
-echo -e "\n==================== DIY Script All Tasks Finished ====================\n"
+#修改mini-diskmanager菜单位置
+if [ -d "$PKG_PATH/luci-app-mini-diskmanager" ]; then
+	echo " "
+	if sed -i "s/services/system/g" \
+		"$PKG_PATH/luci-app-mini-diskmanager/luci-app-mini-diskmanager/root/usr/share/luci/menu.d/luci-app-mini-diskmanager.json"; then
+		echo "mini-diskmanager has been fixed!"
+	else
+		echo "mini-diskmanager fix failed; continuing!"
+	fi
+fi
+
+#修复TailScale配置文件冲突
+FEEDS_PACKAGES="$PKG_PATH/../feeds/packages"
+TS_FILE="$(find "$FEEDS_PACKAGES" -maxdepth 3 -type f -wholename '*/tailscale/Makefile' -print -quit 2>/dev/null)"
+if [ -f "$TS_FILE" ]; then
+	echo " "
+
+	if sed -i '/\/files/d' "$TS_FILE"; then
+		echo "tailscale has been fixed!"
+	else
+		echo "tailscale fix failed; continuing!"
+	fi
+fi
+
+#修复Rust编译失败
+RUST_FILE="$(find "$FEEDS_PACKAGES" -maxdepth 3 -type f -wholename '*/rust/Makefile' -print -quit 2>/dev/null)"
+if [ -f "$RUST_FILE" ]; then
+	echo " "
+
+	if sed -i 's/ci-llvm=true/ci-llvm=false/g' "$RUST_FILE"; then
+		echo "rust has been fixed!"
+	else
+		echo "rust fix failed; continuing!"
+	fi
+fi

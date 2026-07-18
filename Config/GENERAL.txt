@@ -1,88 +1,64 @@
-# ==================== 新增插件（用户定制） ====================
+# ==================== NSS 硬件加速（必要） ====================
+CONFIG_NSS_OFFLOAD=y
+CONFIG_NSS_BRIDGE_OFFLOAD=y
+CONFIG_NSS_DP=y
+CONFIG_NSS_WIFI_OFFLOAD=y
+CONFIG_NSS_FIREWALL=y
+
+# NSS 内核依赖（必须）
+CONFIG_KERNEL_NET_CLS_ACT=y
+CONFIG_KERNEL_NET_SCH_INGRESS=y
+CONFIG_KERNEL_NET_SCH_FQ_CODEL=y
+CONFIG_KERNEL_NET_CLS_FLOWER=y
+CONFIG_KERNEL_NET_ACT_GACT=y
+CONFIG_KERNEL_NET_SCH_TBF=y
+
+# IPQ60XX Wi-Fi 固件（若设备有 Wi-Fi 且需要 NSS 卸载）
+CONFIG_PACKAGE_ath11k-firmware-ipq6018=y
+CONFIG_PACKAGE_kmod-ath11k-ahb=y
+
+# ==================== 强制禁用与 NSS 冲突的包 ====================
+CONFIG_PACKAGE_sqm-scripts=n
+CONFIG_PACKAGE_sqm-scripts-nss=n
+CONFIG_PACKAGE_luci-app-sqm=n
+CONFIG_PACKAGE_luci-app-turboacc=n
+CONFIG_PACKAGE_kmod-fast-classifier=n
+CONFIG_PACKAGE_kmod-shortcut-fe=n
+CONFIG_PACKAGE_kmod-nft-offload=n
+CONFIG_PACKAGE_kmod-nf-flow=n
+
+# ==================== 您需要的插件 ====================
 CONFIG_PACKAGE_luci-app-autoreboot=y
 CONFIG_PACKAGE_luci-app-upnp=y
 CONFIG_PACKAGE_miniupnpd-nftables=y
 
-# ==================== ZeroTier 异地组网 ====================
 CONFIG_PACKAGE_luci-app-zerotier=y
 CONFIG_PACKAGE_zerotier=y
 CONFIG_PACKAGE_kmod-tun=y
 CONFIG_PACKAGE_kmod-br-netfilter=y
 
-# ==================== 网页终端 ttyd ====================
 CONFIG_PACKAGE_luci-app-ttyd=y
 CONFIG_PACKAGE_ttyd=y
 CONFIG_PACKAGE_libwebsockets=y
 
-# ==================== 消息推送 ====================
 CONFIG_PACKAGE_luci-app-wechatpush=y
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_iputils-arping=y
 
-# ==================== 网络唤醒 WOL ====================
 CONFIG_PACKAGE_luci-app-wol=y
 CONFIG_PACKAGE_etherwake=y
 
-# ==================== adguardhome ====================
+# AdGuardHome（使用 kong 版本，禁用原版）
 CONFIG_PACKAGE_luci-app-adguardhome=n
 CONFIG_PACKAGE_adguardhome=n
 CONFIG_PACKAGE_luci-app-adguardhome-kong=y
 
-# ==================== 删除无用插件 ====================
-CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
-CONFIG_PACKAGE_luci-app-gecoosac=n
-
-# ==================== 全局编译参数 ====================
-CONFIG_CCACHE=y
-CONFIG_DEVEL=y
-CONFIG_FEED_video=n
-CONFIG_TARGET_MULTI_PROFILE=y
-CONFIG_TARGET_PER_DEVICE_ROOTFS=y
-CONFIG_TARGET_ROOTFS_INITRAMFS=n
-
-# ==================== 系统性能组件 ====================
-CONFIG_PACKAGE_autocore=y
-CONFIG_PACKAGE_coremark=y
-CONFIG_PACKAGE_cpufreq=y
-CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-CONFIG_PACKAGE_curl=y
-
-# ==================== ZeroTier 依赖库 ====================
-CONFIG_PACKAGE_jq=y
-CONFIG_PACKAGE_xz=y
-CONFIG_PACKAGE_libstdcpp=y
-
-# ==================== 调试监控工具 ====================
-CONFIG_PACKAGE_htop=y
-CONFIG_PACKAGE_iperf3=y
-
-# ==================== ZRAM 内存压缩（LZ4高性能） ====================
+# ==================== 系统增强（按需） ====================
 CONFIG_PACKAGE_zram-swap=y
 CONFIG_PACKAGE_kmod-lib-lz4=y
 CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y
 CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
 
-# ==================== IPv6 DHCP ====================
+# 若需要 IPv6 DHCP（默认已启用，这里显式保留）
 CONFIG_PACKAGE_odhcpd=y
 CONFIG_PACKAGE_odhcpd-ipv6only=n
-
-# ==================== 禁用 SQM（与 NSS 硬件加速冲突） ====================
-CONFIG_PACKAGE_sqm-scripts-nss=n
-
-# ==================== Wi-Fi 驱动（AHB 总线） ====================
-CONFIG_PACKAGE_kmod-ath11k-ahb=y
-# CONFIG_PACKAGE_kmod-ath11k-pci is not set
-
-# ==================== 软件流表禁用（与 NSS 硬件加速冲突） ====================
-CONFIG_PACKAGE_kmod-nft-offload=n
-CONFIG_PACKAGE_kmod-nf-flow=n
-
-# ==================== Mesh 禁用 ====================
-CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=n
-
-# ==================== 测试工具禁用 ====================
-CONFIG_PACKAGE_kmod-net-selftests=n
-
-# ==================== 补充优化 ====================
-# 强制禁用网桥 netfilter（避免干扰 NSS 桥接卸载）
-# CONFIG_PACKAGE_kmod-br-netfilter is not set

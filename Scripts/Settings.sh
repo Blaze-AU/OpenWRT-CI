@@ -57,17 +57,7 @@ green "=== 2. 主题与语言设置 ==="
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 
-# NSS 卸载功能
-set_config "CONFIG_NSS_OFFLOAD" "y"
-set_config "CONFIG_NSS_BRIDGE_OFFLOAD" "y"
-set_config "CONFIG_NSS_DP" "y"
 
-# NSS WiFi 卸载（IPQ60XX/IPQ807X 支持）[reference:4]
-set_config "CONFIG_NSS_WIFI_OFFLOAD" "y"
-
-# 防火墙 NSS 卸载（取代传统 flow_offloading）
-set_config "CONFIG_NSS_FIREWALL" "y"
-green "✅ NSS 核心配置已启用"
 
 # ---------- 4. 禁用冲突包 ----------
 green "=== 4. 禁用冲突包 ==="
@@ -118,20 +108,7 @@ green "=== 8. defconfig 依赖补全 ==="
 make defconfig >/dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
 green "✅ 依赖补全完成"
 
-# ---------- 9. 内核配置优化 ----------
-green "=== 9. 内核配置优化 ==="
-# CPU 调速器
-set_config "CONFIG_KERNEL_CPU_FREQ_GOV_SCHEDUTIL" "y"
-set_config "CONFIG_KERNEL_CPU_FREQ_GOV_ONDEMAND" "y"
 
-# NSS 相关内核选项
-set_config "CONFIG_KERNEL_NET_CLS_ACT" "y"
-set_config "CONFIG_KERNEL_NET_SCH_INGRESS" "y"
-set_config "CONFIG_KERNEL_NET_SCH_FQ_CODEL" "y"
-
-# GCC14 支持
-set_config "CONFIG_GCC_VERSION_14" "y"
-green "✅ 内核优化完成"
 
 # ---------- 10. uci-defaults 系统配置 ----------
 green "=== 10. 系统默认配置 (uci-defaults) ==="
@@ -263,11 +240,7 @@ if grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config 2>/dev/null; then
     ERRORS=$((ERRORS + 1))
 fi
 
-# NSS 核心配置检查
-if ! grep -q "^CONFIG_NSS_OFFLOAD=y" .config 2>/dev/null; then
-    red "❌ NSS_OFFLOAD 未启用"
-    ERRORS=$((ERRORS + 1))
-fi
+
 
 # 中文语言
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config || { red "❌ 中文未启用"; ERRORS=$((ERRORS + 1)); }

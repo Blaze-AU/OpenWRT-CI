@@ -57,14 +57,19 @@ green "=== 2. 主题与语言设置 ==="
 set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 
-
-
-# ---------- 4. 禁用冲突包 ----------
+# ---- 4. 禁用冲突包（统一先禁用再启用，避免冲突） ----
 green "=== 4. 禁用冲突包 ==="
-# SQM 与 NSS 冲突，必须禁用
-disable_pkg sqm-scripts luci-app-sqm
 
-# USB 相关（按需禁用）
+# 4.1 先统一禁用所有冲突包
+disable_pkg \
+    sqm-scripts luci-app-sqm \
+    luci-app-turboacc
+
+force_disable_pkg \
+    kmod-fast-classifier kmod-shortcut-fe \
+    kmod-nft-offload kmod-nf-flow
+
+# 4.2 USB 相关（按需禁用）
 disable_pkg \
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
     kmod-usb-storage-uas kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-xhci-hcd \
@@ -72,18 +77,15 @@ disable_pkg \
     block-mount automount f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 force_disable_pkg kmod-usb-core kmod-usb-storage
 
+# 4.3 然后统一启用需要保留的模块（确保不会被禁用覆盖）
+set_pkg \
+    kmod-ipt-core kmod-nf-ipt kmod-nf-nat
 
-# 禁用与 NSS 冲突的软件及内核模块
-disable_pkg luci-app-turboacc
-force_disable_pkg kmod-fast-classifier kmod-shortcut-fe \
-    kmod-nft-offload kmod-nf-flow \
-    kmod-ipt-core kmod-nf-ipt kmod-nf-log kmod-nf-log6 kmod-nf-reject kmod-nf-reject6
-
-# 内核选项禁止通用流卸载，防止被依赖强制拉回
+# 内核选项禁止通用流卸载
 set_config "CONFIG_NF_FLOW_TABLE" "n"
 set_config "CONFIG_NFT_FLOW_OFFLOAD" "n"
 
-green "✅ 冲突包已禁用"
+green "✅ 冲突包已禁用，兼容模块已保留"
 
 # ---------- 5. 私有扩展配置 ----------
 if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
@@ -115,8 +117,6 @@ fi
 green "=== 8. defconfig 依赖补全 ==="
 make defconfig >/dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
 green "✅ 依赖补全完成"
-
-
 
 # ---------- 10. uci-defaults 系统配置 ----------
 green "=== 10. 系统默认配置 (uci-defaults) ==="
@@ -247,8 +247,6 @@ if grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config 2>/dev/null; then
     red "❌ SQM 仍启用，与 NSS 冲突"
     ERRORS=$((ERRORS + 1))
 fi
-
-
 
 # 中文语言
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config || { red "❌ 中文未启用"; ERRORS=$((ERRORS + 1)); }

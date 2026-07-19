@@ -1,7 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-# Optimized for LibWrt upstream (https://github.com/LiBwrt/LibWrt)
 
 set -eo pipefail
 
@@ -66,7 +65,7 @@ set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
 set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
 green "✅ 主题语言设置完成"
 
-# ---- 3. NSS 核心驱动强制锁定（12.5 固件） ----
+# ---- 3. NSS 核心驱动强制锁定（12.5 固件 + 1GB内存优化） ----
 green "=== 3. NSS 核心驱动锁定 ==="
 # 交换驱动：强制 SSDK，禁用 DSA（NSS 生效前提）
 set_pkg kmod-qca-ssdk
@@ -74,6 +73,13 @@ disable_pkg kmod-dsa-qca8k
 
 # NSS 固件锁定 12.5 最新稳定版本
 set_config "CONFIG_NSS_FIRMWARE_VERSION_12_5" "y"
+# 显式锁定 NSS 固件包，避免依赖遗漏
+set_pkg nss-firmware-ipq60xx nss-eip-firmware
+
+# 1GB 内存专属：CMA 连续内存锁定 128MB
+set_config "CONFIG_CMA_SIZE_MBYTES" "128"
+set_config "CONFIG_CMA" "y"
+set_config "CONFIG_DMA_CMA" "y"
 
 # NSS 核心驱动套件
 set_pkg kmod-qca-nss-drv kmod-qca-nss-dp kmod-qca-nss-drv-pppoe \
@@ -209,6 +215,7 @@ sed -i "s/\${WRT_SSID}/${WRT_SSID}/g; s/\${WRT_WORD}/${WRT_WORD}/g" "$UCI_DIR/99
 chmod +x "$UCI_DIR/99-wifi"
 
 # 9.3 防火墙 + NSS 卸载 + 硬件全锥 NAT + debugfs 兜底 + ECM 优化
+# 注：上游 WAN 区默认已开启 MSS 钳制，PPPoE 场景自动适配，无需重复配置
 cat > "$UCI_DIR/99-firewall" << 'EOF'
 #!/bin/sh
 
@@ -282,7 +289,7 @@ exit 0
 EOF
 chmod +x "$UCI_DIR/99-cpufreq"
 
-# 9.5 全自动中断均衡（irqbalance + RPS/XPS，不固定绑核）
+# 9.5 全自动中断均衡（irqbalance + RPS/XPS，兼容 wan/lan* / eth* 命名）
 cat > "$UCI_DIR/99-irq" << 'EOF'
 #!/bin/sh
 
@@ -291,15 +298,19 @@ cat > "$UCI_DIR/99-irq" << 'EOF'
 /etc/init.d/irqbalance start
 logger -t irq "✅ irqbalance 自动中断均衡服务已启动"
 
-# 2. RPS 接收端数据包分发：自动分散到所有可用 CPU
-for iface in /sys/class/net/eth*; do
+# 2. RPS 接收端数据包分发：兼容 wan / lan* / eth* 三种网口命名
+for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
     [ -d "$iface" ] || continue
     iface_name=$(basename "$iface")
+
+    # 遍历所有接收队列，开启 RPS
     for queue in "$iface"/queues/rx-*; do
         [ -d "$queue" ] || continue
         echo f > "$queue/rps_cpus" 2>/dev/null
         echo 4096 > "$queue/rps_flow_cnt" 2>/dev/null
     done
+
+    # 增大发送队列长度，应对突发流量
     ip link set "$iface_name" txqueuelen 5000 2>/dev/null
     logger -t irq "✅ ${iface_name} RPS 接收分发 + 队列长度已优化"
 done
@@ -315,10 +326,11 @@ for iface in br-lan br-wan; do
     fi
 done
 
-# 3. XPS 发送端数据包分发
-for iface in /sys/class/net/eth*; do
+# 3. XPS 发送端数据包分发：兼容所有物理有线口
+for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
     [ -d "$iface" ] || continue
     iface_name=$(basename "$iface")
+
     for queue in "$iface"/queues/tx-*; do
         [ -d "$queue" ] || continue
         echo f > "$queue/xps_cpus" 2>/dev/null
@@ -398,19 +410,6 @@ EOF
     green "✅ sysctl 参数已写入"
 fi
 
-# ---------- 11. nowifi 适配（修复 IPQ60xx 路径） ----------
-green "=== 11. nowifi 适配 ==="
-if [[ "${WRT_CONFIG,,}" == *"nowifi"* ]]; then
-    [ -n "${GITHUB_ENV:-}" ] && echo "WRT_WIFI=wifi-no" >> "$GITHUB_ENV"
-    dts_path="./target/linux/ipq60xx/files/arch/arm/boot/dts/qcom/"
-    if [ -d "$dts_path" ]; then
-        find "$dts_path" -name "ipq6018*.dts" -exec sed -i.bak 's/ipq6018.dtsi/ipq6018-nowifi.dtsi/g' {} +
-        green "✅ DTS nowifi 适配完成"
-    else
-        yellow "⚠️ 未找到 IPQ60xx DTS 路径，跳过 nowifi 适配"
-    fi
-    disable_pkg wpad-openssl wifi-scripts ath11k-firmware-ipq6018 kmod-ath11k-ahb
-fi
 
 # ---------- 12. 最终校验 ----------
 green "=== 12. 最终校验 ==="

@@ -165,6 +165,35 @@ green "=== 8. defconfig 依赖补全 ==="
 make defconfig >/dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
 green "✅ 依赖补全完成"
 
+# ---------- 8.5 defconfig 后处理（彻底移除软件流控） ----------
+green "=== 8.5 后处理硬阻断（彻底移除 nf-flow / nft-offload / net-selftests） ==="
+
+# 1. 删除内核级配置
+for key in \
+    CONFIG_NF_FLOW_TABLE \
+    CONFIG_NF_FLOW_TABLE_IPV4 \
+    CONFIG_NF_FLOW_TABLE_IPV6 \
+    CONFIG_NF_FLOW_TABLE_INET \
+    CONFIG_NFT_FLOW_OFFLOAD \
+    CONFIG_NETFILTER_XT_MATCH_FLOW \
+    CONFIG_NETFILTER_XT_TARGET_FLOW \
+    CONFIG_NETFILTER_FLOW_TABLE \
+    CONFIG_NFT_TUNNEL
+do
+    sed -i "/^${key}=/d" .config
+    sed -i "/^# ${key} is not set/d" .config
+    echo "# ${key} is not set" >> .config
+done
+
+# 2. 删除包级别配置
+for pkg in kmod-nf-flow kmod-nft-offload kmod-net-selftests kmod-nft-fullcone; do
+    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+    sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
+    echo "# CONFIG_PACKAGE_${pkg} is not set" >> .config
+done
+
+green "✅ 后处理硬阻断完成：所有软件流控模块已移除"
+
 # ---------- 9. uci-defaults 系统默认配置 ----------
 green "=== 9. uci-defaults 系统默认配置 ==="
 UCI_DIR="./package/base-files/files/etc/uci-defaults"

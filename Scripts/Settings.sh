@@ -72,9 +72,17 @@ disable_pkg \
     block-mount automount f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 force_disable_pkg kmod-usb-core kmod-usb-storage
 
-# 禁用与 NSS 冲突的 offload 方案
+
+# 禁用与 NSS 冲突的软件及内核模块
 disable_pkg luci-app-turboacc
-force_disable_pkg kmod-fast-classifier kmod-shortcut-fe
+force_disable_pkg kmod-fast-classifier kmod-shortcut-fe \
+    kmod-nft-offload kmod-nf-flow \
+    kmod-ipt-core kmod-nf-ipt kmod-nf-log kmod-nf-log6 kmod-nf-reject kmod-nf-reject6
+
+# 内核选项禁止通用流卸载，防止被依赖强制拉回
+set_config "CONFIG_NF_FLOW_TABLE" "n"
+set_config "CONFIG_NFT_FLOW_OFFLOAD" "n"
+
 green "✅ 冲突包已禁用"
 
 # ---------- 5. 私有扩展配置 ----------

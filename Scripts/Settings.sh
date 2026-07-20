@@ -131,6 +131,7 @@ set_config "CONFIG_NETFILTER_XT_MATCH_FLOW" "n"
 set_config "CONFIG_NETFILTER_XT_TARGET_FLOW" "n"
 set_config "CONFIG_NETFILTER_FLOW_TABLE" "n"
 set_config "CONFIG_NFT_TUNNEL" "n"
+set_config "CONFIG_PACKAGE_kmod-nft-fullcone" "n"
 
 green "✅ 冲突包已禁用，内核流控已阻断"
 

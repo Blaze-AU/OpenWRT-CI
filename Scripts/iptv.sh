@@ -22,7 +22,7 @@ setup_iptv() {
     local IPTV_NETS="224.0.0.0/4 10.0.0.0/8 183.235.0.0/16"  # 云浮移动常用网段
 
     # 1. 安装IPTV依赖（需确保 set_pkg 在编译环境中已定义）
-    set_pkg igmpproxy luci-app-igmpproxy kmod-igmp udpxy luci-app-udpxy
+    set_pkg igmpproxy luci-app-igmpproxy kmod-igmp udpxy luci-app-udpxy xupnpd
 
     # 2. 创建配置目录
     mkdir -p ./package/base-files/files/etc/uci-defaults

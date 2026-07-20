@@ -244,11 +244,9 @@ sed -i "s/\${WRT_SSID}/${WRT_SSID}/g; s/\${WRT_WORD}/${WRT_WORD}/g" "$UCI_DIR/99
 chmod +x "$UCI_DIR/99-wifi"
 
 # 9.3 防火墙 + NSS 卸载 + 硬件全锥 NAT + debugfs 兜底 + ECM 优化
-# 注：上游 WAN 区默认已开启 MSS 钳制，PPPoE 场景自动适配，无需重复配置
 cat > "$UCI_DIR/99-firewall" << 'EOF'
 #!/bin/sh
 
-# debugfs 挂载兜底，确保 NSS 调优节点可用
 if ! mountpoint -q /sys/kernel/debug; then
     mount -t debugfs none /sys/kernel/debug 2>/dev/null && \
         logger -t nss "✅ debugfs 挂载成功" || \
@@ -264,7 +262,6 @@ uci set firewall.@defaults[0].ipv6='1'
 uci set firewall.@defaults[0].syn_flood='0'
 uci commit firewall
 
-# 开启 NSS 硬件全锥 NAT（IPv4+IPv6）
 if [ -f /sys/kernel/debug/ecm/ecm_nss_ipv4/fullcone_enable ]; then
     echo 1 > /sys/kernel/debug/ecm/ecm_nss_ipv4/fullcone_enable
     logger -t nss "✅ NSS IPv4 硬件全锥 NAT 已开启"
@@ -274,7 +271,6 @@ if [ -f /sys/kernel/debug/ecm/ecm_nss_ipv6/fullcone_enable ]; then
     logger -t nss "✅ NSS IPv6 硬件全锥 NAT 已开启"
 fi
 
-# ECM 流表老化策略优化（12.5 固件适配）
 if [ -d /sys/kernel/debug/ecm/ecm_nss_ipv4 ]; then
     echo 30 > /sys/kernel/debug/ecm/ecm_nss_ipv4/tcp_syn_recv_timeout
     echo 30 > /sys/kernel/debug/ecm/ecm_nss_ipv4/tcp_fin_wait_timeout
@@ -284,7 +280,6 @@ if [ -d /sys/kernel/debug/ecm/ecm_nss_ipv4 ]; then
     logger -t nss "✅ ECM 流表老化策略已优化"
 fi
 
-# 禁用桥接防火墙钩子，保障二层流量完全走 NSS 硬件转发
 sysctl -w net.bridge.bridge-nf-call-iptables=0
 sysctl -w net.bridge.bridge-nf-call-ip6tables=0
 
@@ -307,7 +302,6 @@ for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
     fi
 done
 
-# 降低 schedutil 变频延迟，提升突发流量响应
 policy_dir="/sys/devices/system/cpu/cpufreq/policy0"
 if [ -d "$policy_dir" ]; then
     echo 500 > "$policy_dir/schedutil/up_rate_limit_us" 2>/dev/null
@@ -318,33 +312,25 @@ exit 0
 EOF
 chmod +x "$UCI_DIR/99-cpufreq"
 
-# 9.5 全自动中断均衡（irqbalance + RPS/XPS，兼容 wan/lan* / eth* 命名）
+# 9.5 全自动中断均衡
 cat > "$UCI_DIR/99-irq" << 'EOF'
 #!/bin/sh
-
-# 1. 启用 irqbalance 守护进程，动态均衡硬中断
 /etc/init.d/irqbalance enable
 /etc/init.d/irqbalance start
 logger -t irq "✅ irqbalance 自动中断均衡服务已启动"
 
-# 2. RPS 接收端数据包分发：兼容 wan / lan* / eth* 三种网口命名
 for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
     [ -d "$iface" ] || continue
     iface_name=$(basename "$iface")
-
-    # 遍历所有接收队列，开启 RPS
     for queue in "$iface"/queues/rx-*; do
         [ -d "$queue" ] || continue
         echo f > "$queue/rps_cpus" 2>/dev/null
         echo 4096 > "$queue/rps_flow_cnt" 2>/dev/null
     done
-
-    # 增大发送队列长度，应对突发流量
     ip link set "$iface_name" txqueuelen 5000 2>/dev/null
     logger -t irq "✅ ${iface_name} RPS 接收分发 + 队列长度已优化"
 done
 
-# 桥接接口同步开启 RPS
 for iface in br-lan br-wan; do
     if [ -d "/sys/class/net/$iface" ]; then
         for queue in /sys/class/net/$iface/queues/rx-*; do
@@ -355,11 +341,9 @@ for iface in br-lan br-wan; do
     fi
 done
 
-# 3. XPS 发送端数据包分发：兼容所有物理有线口
 for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
     [ -d "$iface" ] || continue
     iface_name=$(basename "$iface")
-
     for queue in "$iface"/queues/tx-*; do
         [ -d "$queue" ] || continue
         echo f > "$queue/xps_cpus" 2>/dev/null
@@ -371,14 +355,11 @@ exit 0
 EOF
 chmod +x "$UCI_DIR/99-irq"
 
-# 9.6 ZRAM 动态自适应（按物理内存自动分配）
+# 9.6 ZRAM 动态自适应
 cat > "$UCI_DIR/99-zram" << 'EOF'
 #!/bin/sh
-
 mem_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 mem_total_mb=$(( mem_total_kb / 1024 ))
-
-# 分级策略：小内存多分配，大内存少分配
 if [ "$mem_total_mb" -le 512 ]; then
     zram_size=$(( mem_total_mb / 2 ))
 elif [ "$mem_total_mb" -lt 2048 ]; then
@@ -386,19 +367,43 @@ elif [ "$mem_total_mb" -lt 2048 ]; then
 else
     zram_size=512
 fi
-
 uci set zram.@zram[0].comp_algo='lz4'
 uci set zram.@zram[0].size="${zram_size}"
 uci commit zram
-
 logger -t zram "📦 物理内存 ${mem_total_mb}MB，自动设置 ZRAM 为 ${zram_size}MB (LZ4)"
-
 /etc/init.d/zram restart
 exit 0
 EOF
 chmod +x "$UCI_DIR/99-zram"
 
 green "✅ uci-defaults 全部配置写入完成"
+
+# ---------- 9.5 init.d 开机脚本（永久保留） ----------
+green "=== 9.5 init.d 开机脚本 ==="
+INIT_DIR="./package/base-files/files/etc/init.d"
+mkdir -p "$INIT_DIR"
+
+cat > "$INIT_DIR/kick_nf_flow" << 'EOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+
+start() {
+    sleep 15
+    rmmod nft_flow_offload 2>/dev/null
+    rmmod nf_flow_table 2>/dev/null
+    rmmod net_selftests 2>/dev/null
+    /etc/init.d/ecm restart 2>/dev/null || killall -9 ecm 2>/dev/null
+    if lsmod | grep -q "nf_flow\|nft_offload"; then
+        logger -t boot-kick "⚠️ 卸载失败，模块仍被使用"
+    else
+        logger -t boot-kick "✅ 冲突模块已卸载，NSS 独占硬件加速"
+    fi
+}
+EOF
+
+chmod +x "$INIT_DIR/kick_nf_flow"
+green "✅ kick_nf_flow 开机脚本已写入 $INIT_DIR"
 
 # ---------- 10. sysctl 网络与内存调优 ----------
 green "=== 10. sysctl 网络调优 ==="
@@ -410,41 +415,29 @@ if ! grep -q "nf_conntrack_max" "$SYSCTL_CONF" 2>/dev/null; then
 net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 30
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
 net.netfilter.nf_conntrack_max = 262144
-
-# TCP 缓冲区优化（千兆宽带适配）
 net.core.rmem_default = 87380
 net.core.wmem_default = 87380
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
 net.ipv4.tcp_rmem = 4096 87380 67108864
 net.ipv4.tcp_wmem = 4096 65536 67108864
-
-# TCP 传输效率优化
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.tcp_fastopen = 3
 net.core.netdev_max_backlog = 5000
-
-# RPS 流表支持
 net.core.rps_sock_flow_entries = 32768
-
-# 内存回收策略
 vm.min_free_kbytes = 16384
 vm.swappiness = 10
 vm.page-cluster = 3
-
-# 禁用桥接 netfilter 钩子，保障 NSS 桥接加速
 net.bridge.bridge-nf-call-iptables = 0
 net.bridge.bridge-nf-call-ip6tables = 0
 EOF
     green "✅ sysctl 参数已写入"
 fi
 
-
 # ---------- 12. 最终校验 ----------
 green "=== 12. 最终校验 ==="
 ERRORS=0
 
-# 软件加速类必须禁用
 if grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config 2>/dev/null; then
     red "❌ SQM 仍启用，与 NSS 冲突"
     ERRORS=$((ERRORS + 1))
@@ -453,14 +446,10 @@ if grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config 2>/dev/null; then
     red "❌ turboacc 仍启用，与 NSS 冲突"
     ERRORS=$((ERRORS + 1))
 fi
-
-# NSS 核心必须启用
 if ! grep -q "^CONFIG_PACKAGE_kmod-qca-nss-ecm=y" .config 2>/dev/null; then
     red "❌ NSS ECM 核心驱动未启用"
     ERRORS=$((ERRORS + 1))
 fi
-
-# 交换驱动必须正确
 if ! grep -q "^CONFIG_PACKAGE_kmod-qca-ssdk=y" .config 2>/dev/null; then
     red "❌ SSDK 交换驱动未启用，NSS 无法生效"
     ERRORS=$((ERRORS + 1))
@@ -469,8 +458,6 @@ if grep -q "^CONFIG_PACKAGE_kmod-dsa-qca8k=y" .config 2>/dev/null; then
     red "❌ DSA 驱动仍启用，与 NSS 冲突"
     ERRORS=$((ERRORS + 1))
 fi
-
-# 中文语言
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config || { red "❌ 中文语言未启用"; ERRORS=$((ERRORS + 1)); }
 
 [ $ERRORS -eq 0 ] && green "🎉 所有核心检查通过，NSS 12.5 配置无误" || { red "❌ 存在 ${ERRORS} 项错误，请修复后编译"; exit 1; }

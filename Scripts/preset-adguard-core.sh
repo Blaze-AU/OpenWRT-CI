@@ -33,65 +33,14 @@ green "✅ 切换到 OpenWrt 根目录: $OPENWRT_ROOT"
 
 # ---------- 主流程 ----------
 green "========================================="
-green "AdGuardHome 自定义包（stevenjoezhang 版 v1.19）"
-green "包名改为 luci-app-adguardhome-kong"
-green "========================================="
 
-# 1. 清理旧克隆目录
-green "🧹 清理旧克隆目录..."
-rm -rf package/luci-app-adguardhome-tmp
-rm -rf package/luci-app-adguardhome-kong
+
 
 # 2. 克隆指定 tag（v1.19）
 green "📦 克隆 stevenjoezhang/luci-app-adguardhome (tag: v1.19)..."
 git clone --depth=1 -b v1.19 https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome-tmp
-mv package/luci-app-adguardhome-tmp package/luci-app-adguardhome-kong
 
-# 3. 修改 Makefile
-MAKEFILE="package/luci-app-adguardhome-kong/Makefile"
-if [ ! -f "$MAKEFILE" ]; then
-    red "❌ Makefile 不存在，请检查克隆是否成功"
-    exit 1
-fi
 
-# 3a. 修改包名
-sed -i 's/^PKG_NAME\s*:=.*/PKG_NAME:=luci-app-adguardhome-kong/' "$MAKEFILE"
-green "✅ 已修改 PKG_NAME"
-
-# 3b. 修正版本号，使 APK 打包通过（将 '-' 替换为 '.'，并保证 PKG_RELEASE 为纯数字）
-if grep -q '^PKG_VERSION\s*:=' "$MAKEFILE"; then
-    OLD_VER=$(grep '^PKG_VERSION\s*:=' "$MAKEFILE" | sed 's/^PKG_VERSION\s*:=\s*//')
-    NEW_VER=$(echo "$OLD_VER" | sed 's/-/./g')
-    sed -i "s/^PKG_VERSION\s*:=.*/PKG_VERSION:=$NEW_VER/" "$MAKEFILE"
-    green "✅ 已修正 PKG_VERSION: $OLD_VER -> $NEW_VER"
-else
-    yellow "⚠️ 未找到 PKG_VERSION，将添加默认版本"
-    echo 'PKG_VERSION:=1.19' >> "$MAKEFILE"
-fi
-
-if grep -q '^PKG_RELEASE\s*:=' "$MAKEFILE"; then
-    OLD_REL=$(grep '^PKG_RELEASE\s*:=' "$MAKEFILE" | sed 's/^PKG_RELEASE\s*:=\s*//')
-    if [[ "$OLD_REL" =~ [^0-9] ]]; then
-        sed -i 's/^PKG_RELEASE\s*:=.*/PKG_RELEASE:=1/' "$MAKEFILE"
-        green "✅ 已将 PKG_RELEASE 从 '$OLD_REL' 修正为 '1'"
-    else
-        green "✅ PKG_RELEASE 已合法: $OLD_REL"
-    fi
-else
-    echo 'PKG_RELEASE:=1' >> "$MAKEFILE"
-    green "✅ 已添加 PKG_RELEASE:=1"
-fi
-
-# 4. 更新 feeds
-green "🔄 更新 feeds..."
-./scripts/feeds update -a
-./scripts/feeds install -a
-
-# 5. 清理官方包目录（避免误选）
-green "🧹 删除官方包目录..."
-rm -rf feeds/luci/applications/luci-app-adguardhome
-rm -rf feeds/packages/net/adguardhome
-rm -f feeds/luci.index feeds/packages.index
 
 # 6. 预置核心（arm64）
 green "⬇️ 预置 AdGuardHome 核心（arm64）..."

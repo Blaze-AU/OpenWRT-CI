@@ -1,469 +1,444 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-
+# Target: IPQ60xx Redmi AX5 NSS 12.5 Optimize Config Builder
 set -eo pipefail
+
+# ===================== 全局前置校验 =====================
+REQUIRE_VARS=(WRT_THEME WRT_IP WRT_NAME WRT_SSID WRT_WORD)
+MISS_VAR=0
+for var in "${REQUIRE_VARS[@]}"; do
+    if [[ -z "${!var}" ]]; then
+        red "❌ 环境变量 $var 未定义，脚本无法继续"
+        MISS_VAR=1
+    fi
+done
+if [[ $MISS_VAR -eq 1 ]]; then
+    exit 1
+fi
 
 # ---------- 颜色输出 ----------
 green() { echo -e "\033[32m$1\033[0m"; }
 yellow() { echo -e "\033[33m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 
-# ---------- 工具函数（严格遵循 OpenWrt .config 格式规范） ----------
+# ---------- 工具函数（精简去冗余，OpenWrt .config 标准） ----------
+# 启用软件包
 set_pkg() {
     for pkg in "$@"; do
-        sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
-        sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
+        sed -i "/^CONFIG_PACKAGE_${pkg}=/d; /^# CONFIG_PACKAGE_${pkg} is not set/d" .config
         echo "CONFIG_PACKAGE_${pkg}=y" >> .config
     done
 }
 
+# 彻底禁用软件包（合并原disable/force_disable，逻辑统一）
 disable_pkg() {
     for pkg in "$@"; do
-        sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
-        sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
+        sed -i "/^CONFIG_PACKAGE_${pkg}=/d; /^# CONFIG_PACKAGE_${pkg} is not set/d" .config
         echo "# CONFIG_PACKAGE_${pkg} is not set" >> .config
     done
 }
 
-force_disable_pkg() {
-    for pkg in "$@"; do
-        sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
-        sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
-        echo "# CONFIG_PACKAGE_${pkg} is not set" >> .config
-    done
-}
-
+# 内核配置统一设置
 set_config() {
     local key="$1" value="$2"
-    if [ "$value" = "n" ]; then
-        sed -i "/^${key}=/d" .config
-        sed -i "/^# ${key} is not set/d" .config
+    sed -i "/^${key}=/d; /^# ${key} is not set/d" .config
+    if [[ "$value" = "n" ]]; then
         echo "# ${key} is not set" >> .config
     else
-        if grep -q "^${key}=" .config; then
-            sed -i "s@^${key}=.*@${key}=${value}@g" .config
-        elif grep -q "^# ${key} is not set" .config; then
-            sed -i "s@^# ${key} is not set@${key}=${value}@g" .config
-        else
-            echo "${key}=${value}" >> .config
-        fi
+        echo "${key}=${value}" >> .config
     fi
 }
 
-# ---- 1. 基础源码修改 ----
-green "=== 1. 基础源码修改 ==="
-sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
-sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile") 2>/dev/null || true
-sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js") 2>/dev/null || true
-sed -i 's/(\(luciversion || '\''\))[^)]*)/(\1)/g' $(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js") 2>/dev/null || true
-green "✅ 基础源码修改完成"
+# ==================== 1. 静态源码全局修改 ====================
+green "=== 1. 源码模板全局替换 ==="
+# 移除默认ASU、替换默认主题、修改后台默认网关提示
+LUCI_COL=$(find ./feeds/luci/collections -name Makefile 2>/dev/null || true)
+if [[ -n "$LUCI_COL" ]]; then
+    sed -i "/attendedsysupgrade/d" "$LUCI_COL"
+    sed -i "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" "$LUCI_COL"
+fi
 
-# ---- 2. 主题与语言 ----
-green "=== 2. 主题与语言设置 ==="
-set_pkg luci-theme-$WRT_THEME luci-app-$WRT_THEME-config
-set_config "CONFIG_LUCI_LANG_zh_Hans" "y"
-green "✅ 主题语言设置完成"
+FLASH_JS=$(find ./feeds/luci/modules/luci-mod-system -name flash.js 2>/dev/null || true)
+[[ -n "$FLASH_JS" ]] && sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "$FLASH_JS"
 
-# ---- 3. NSS 核心驱动强制锁定（12.5 固件 + 1GB内存优化） ----
-green "=== 3. NSS 核心驱动锁定 ==="
-# 交换驱动：强制 SSDK，禁用 DSA（NSS 生效前提）
+# 清理固件版本随机时间戳
+RELEASE_FILE="./package/base-files/files/etc/openwrt_release"
+if [[ -f "$RELEASE_FILE" ]]; then
+    sed -i -E 's|/ [0-9]{9}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}||g' "$RELEASE_FILE"
+    sed -i -E 's|-[0-9]{8}||g' "$RELEASE_FILE"
+    sed -i -E 's| [0-9]{9}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}||g' "$RELEASE_FILE"
+    green "✅ 固件版本时间戳清理完成"
+fi
+
+# ==================== 2. LuCI主题与语言 ====================
+green "=== 2. LuCI 主题与中文语言配置 ==="
+set_pkg luci-theme-${WRT_THEME} luci-app-${WRT_THEME}-config
+set_config CONFIG_LUCI_LANG_zh_Hans y
+green "✅ 主题+简体中文已启用"
+
+# ==================== 3. NSS 12.5 IPQ60xx 核心驱动配置 ====================
+green "=== 3. NSS 12.5 硬件加速核心锁定 ==="
+# 交换层：SSDK启用，DSA彻底禁用(NSS硬性前置条件)
 set_pkg kmod-qca-ssdk
 disable_pkg kmod-dsa-qca8k
 
-# NSS 固件锁定 12.5 最新稳定版本
-set_config "CONFIG_NSS_FIRMWARE_VERSION_12_5" "y"
-# 显式锁定 NSS 固件包，避免依赖遗漏
+# NSS固件版本锁定12.5稳定版
+set_config CONFIG_NSS_FIRMWARE_VERSION_12_5 y
 set_pkg nss-firmware-ipq60xx nss-eip-firmware
 
-# 1GB 内存专属：CMA 连续内存锁定 128MB
-set_config "CONFIG_CMA_SIZE_MBYTES" "128"
-set_config "CONFIG_CMA" "y"
-set_config "CONFIG_DMA_CMA" "y"
+# 1GB内存CMA连续内存分配 128MB
+set_config CONFIG_CMA y
+set_config CONFIG_DMA_CMA y
+set_config CONFIG_CMA_SIZE_MBYTES 128
 
-# NSS 核心驱动套件
-set_pkg kmod-qca-nss-drv kmod-qca-nss-dp kmod-qca-nss-drv-pppoe \
-        kmod-qca-nss-ecm kmod-qca-nss-ecm-premium kmod-qca-nss-crypto \
-        kmod-qca-nss-cfi kmod-qca-nss-drv-bridge-mgr
+# NSS全套加速驱动
+set_pkg \
+    kmod-qca-nss-drv kmod-qca-nss-dp kmod-qca-nss-drv-pppoe \
+    kmod-qca-nss-ecm kmod-qca-nss-ecm-premium kmod-qca-nss-crypto \
+    kmod-qca-nss-cfi kmod-qca-nss-drv-bridge-mgr
 
-# DNS 架构：强制 dnsmasq-full
-set_pkg dnsmasq-full
+# DNS与基础服务
+set_pkg dnsmasq-full irqbalance zram kmod-tcp-bbr
 disable_pkg dnsmasq
 
-# 自动中断均衡服务
-set_pkg irqbalance
-green "✅ NSS 12.5 核心驱动锁定完成"
+green "✅ NSS12.5 核心套件加载完成"
 
-# ---- 4. 禁用冲突包与内核流控硬阻断 ----
-green "=== 4. 禁用冲突软件加速包 ==="
-
-# 4.1 全链路禁用软件加速与冲突模块
+# ==================== 4. 冲突软件/内核模块全局屏蔽 ====================
+green "=== 4. 冲突加速组件、USB、流控内核关闭 ==="
+# 4.1 软件流控/软卸载全禁用
 disable_pkg \
-    sqm-scripts sqm-scripts-nss luci-app-sqm \
-    luci-app-turboacc \
-    kmod-fast-classifier kmod-shortcut-fe \
-    kmod-nft-offload kmod-nf-flow \
-    kmod-nft-fullcone kmod-br-netfilter \
-    kmod-nss-ifb
+    sqm-scripts sqm-scripts-nss luci-app-sqm luci-app-turboacc \
+    kmod-fast-classifier kmod-shortcut-fe kmod-nft-offload \
+    kmod-nf-flow kmod-nft-fullcone kmod-nss-ifb kmod-net-selftests
 
-force_disable_pkg \
-    kmod-fast-classifier kmod-shortcut-fe \
-    kmod-nft-offload kmod-nf-flow
-
-# 4.2 USB 相关全禁用（Redmi AX5 无硬件 USB，精简内存）
+# 4.2 Redmi AX5无USB硬件，全部USB栈移除节省内存
 disable_pkg \
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
     kmod-usb-storage-uas kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-xhci-hcd \
-    kmod-usb-common kmod-usb-roles \
-    block-mount automount f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
-force_disable_pkg kmod-usb-core kmod-usb-storage
+    kmod-usb-common kmod-usb-roles block-mount automount \
+    f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 
-# 4.3 保留基础 iptables 内核模块（兼容小众插件）
+# 保留基础iptables nat兼容插件
 set_pkg kmod-ipt-core kmod-nf-ipt kmod-nf-nat
 
-# 4.4 内核级硬阻断软件流控，防止 defconfig 复活
-set_config "CONFIG_NF_FLOW_TABLE" "n"
-set_config "CONFIG_NF_FLOW_TABLE_IPV4" "n"
-set_config "CONFIG_NF_FLOW_TABLE_IPV6" "n"
-set_config "CONFIG_NF_FLOW_TABLE_INET" "n"
-set_config "CONFIG_NFT_FLOW_OFFLOAD" "n"
-set_config "CONFIG_NETFILTER_XT_MATCH_FLOW" "n"
-set_config "CONFIG_NETFILTER_XT_TARGET_FLOW" "n"
-set_config "CONFIG_NETFILTER_FLOW_TABLE" "n"
-set_config "CONFIG_NFT_TUNNEL" "n"
-set_config "CONFIG_PACKAGE_kmod-nft-fullcone" "n"
-
-green "✅ 冲突包已禁用，内核流控已阻断"
-
-# ---------- 5. 私有扩展配置 ----------
-if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
-    green "📂 加载私有配置: PRIVATE.txt"
-    cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> .config
-fi
-
-# ---------- 6. 自定义包追加 ----------
-if [ -n "$WRT_PACKAGE" ]; then
-    green "📦 追加自定义软件包"
-    echo "$WRT_PACKAGE" >> .config
-fi
-
-# ---------- 7. IPTV 配置（可选） ----------
-green "=== 7. IPTV 独立配置 ==="
-if [ -f "$GITHUB_WORKSPACE/Scripts/iptv.sh" ]; then
-    green "📺 加载 IPTV 配置模块"
-    source "$GITHUB_WORKSPACE/Scripts/iptv.sh"
-    if declare -f setup_iptv >/dev/null; then
-        setup_iptv
-    else
-        yellow "⚠️ iptv.sh 中未定义 setup_iptv 函数，跳过"
-    fi
-else
-    yellow "ℹ️ 未找到 IPTV 配置脚本，跳过"
-fi
-
-# ---------- 8. defconfig 依赖补全 ----------
-green "=== 8. defconfig 依赖补全 ==="
-make defconfig >/dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
-green "✅ 依赖补全完成"
-
-# ---------- 8.5 defconfig 后处理（彻底移除软件流控） ----------
-green "=== 8.5 后处理硬阻断（彻底移除 nf-flow / nft-offload / net-selftests） ==="
-
-# 1. 删除内核级配置
-for key in \
-    CONFIG_NF_FLOW_TABLE \
-    CONFIG_NF_FLOW_TABLE_IPV4 \
-    CONFIG_NF_FLOW_TABLE_IPV6 \
-    CONFIG_NF_FLOW_TABLE_INET \
-    CONFIG_NFT_FLOW_OFFLOAD \
-    CONFIG_NETFILTER_XT_MATCH_FLOW \
-    CONFIG_NETFILTER_XT_TARGET_FLOW \
-    CONFIG_NETFILTER_FLOW_TABLE \
-    CONFIG_NFT_TUNNEL
-do
-    sed -i "/^${key}=/d" .config
-    sed -i "/^# ${key} is not set/d" .config
-    echo "# ${key} is not set" >> .config
+# 4.3 内核层面永久关闭flow流表卸载（杜绝defconfig自动恢复）
+FLOW_KERNEL_CONFS=(
+    CONFIG_NF_FLOW_TABLE CONFIG_NF_FLOW_TABLE_IPV4 CONFIG_NF_FLOW_TABLE_IPV6
+    CONFIG_NF_FLOW_TABLE_INET CONFIG_NFT_FLOW_OFFLOAD CONFIG_NETFILTER_XT_MATCH_FLOW
+    CONFIG_NETFILTER_XT_TARGET_FLOW CONFIG_NETFILTER_FLOW_TABLE CONFIG_NFT_TUNNEL
+)
+for conf in "${FLOW_KERNEL_CONFS[@]}"; do
+    set_config "$conf" n
 done
 
-# 2. 删除包级别配置
-for pkg in kmod-nf-flow kmod-nft-offload kmod-net-selftests kmod-nft-fullcone; do
-    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
-    sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
-    echo "# CONFIG_PACKAGE_${pkg} is not set" >> .config
+green "✅ 所有软件流控、USB、冲突驱动已禁用"
+
+# ==================== 5. 私有配置注入 ====================
+green "=== 5. 加载私有扩展配置 ==="
+if [[ -f "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" ]]; then
+    cat "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" >> .config
+    green "✅ 私有配置 PRIVATE.txt 追加完成"
+fi
+
+# ==================== 6. 自定义软件包追加 ====================
+if [[ -n "${WRT_PACKAGE}" ]]; then
+    green "📦 追加自定义软件包列表"
+    echo "${WRT_PACKAGE}" >> .config
+fi
+
+# ==================== 7. defconfig 基础依赖自动补全 ====================
+green "=== 7. make defconfig 自动依赖解析 ==="
+make defconfig >/dev/null 2>&1 || { red "❌ make defconfig 执行失败"; exit 1; }
+green "✅ 依赖自动补齐完成"
+
+# ==================== 8. defconfig后二次硬阻断（防止依赖自动恢复冲突模块） ====================
+green "=== 8. 二次内核/包硬屏蔽流控模块 ==="
+# 重新清空并禁用flow相关内核参数
+for conf in "${FLOW_KERNEL_CONFS[@]}"; do
+    set_config "$conf" n
 done
 
-green "✅ 后处理硬阻断完成：所有软件流控模块已移除"
+# 二次屏蔽冲突内核包
+FLOW_PKGS=(kmod-nf-flow kmod-nft-offload kmod-net-selftests kmod-nft-fullcone)
+for pkg in "${FLOW_PKGS[@]}"; do
+    disable_pkg "$pkg"
+done
 
-# ---------- 9. uci-defaults 系统默认配置 ----------
-green "=== 9. uci-defaults 系统默认配置 ==="
-UCI_DIR="./package/base-files/files/etc/uci-defaults"
-mkdir -p "$UCI_DIR"
+# 二次defconfig固化屏蔽结果，彻底杜绝复活
+make defconfig >/dev/null 2>&1 || { red "❌ 二次defconfig失败"; exit 1; }
+green "✅ 流控模块永久屏蔽完成"
 
-# 9.1 基础网络与主机名
-cat > "$UCI_DIR/99-base" << 'EOF'
+# ==================== 9. uci-defaults 出厂默认配置 ====================
+green "=== 9. 生成出厂默认UCI脚本 ==="
+UCI_BASE="./package/base-files/files/etc/uci-defaults"
+mkdir -p "${UCI_BASE}"
+
+# 工具：覆盖生成脚本，避免重复写入
+write_uci() {
+    local fpath="$1"
+    shift
+    cat > "${fpath}" <<EOF
+$*
+EOF
+    chmod +x "${fpath}"
+}
+
+# 9.1 基础网络、主机名、IPv6默认
+write_uci "${UCI_BASE}/99-base" '
 #!/bin/sh
-uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr='${WRT_IP}'; uci commit network; }
-uci -q get system.@system[0].hostname || { uci set system.@system[0].hostname='${WRT_NAME}'; uci commit system; }
-uci -q get network.wan.mtu || { uci set network.wan.mtu='1492'; uci commit network; }
-uci set network.wan.ipv6='auto'
-uci set network.lan.ip6assign='64'
-uci set dhcp.lan.ra='hybrid'
-uci set dhcp.lan.dhcpv6='hybrid'
-uci set dhcp.lan.ndp='1'
+uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr="'${WRT_IP}'"; uci commit network; }
+uci -q get system.@system[0].hostname || { uci set system.@system[0].hostname="'${WRT_NAME}'"; uci commit system; }
+uci -q get network.wan.mtu || { uci set network.wan.mtu="1492"; uci commit network; }
+uci set network.wan.ipv6="auto"
+uci set network.lan.ip6assign="64"
+uci set dhcp.lan.ra="hybrid"
+uci set dhcp.lan.dhcpv6="hybrid"
+uci set dhcp.lan.ndp="1"
 uci commit network
 uci commit dhcp
 exit 0
-EOF
-sed -i "s/\${WRT_IP}/${WRT_IP}/g; s/\${WRT_NAME}/${WRT_NAME}/g" "$UCI_DIR/99-base"
-chmod +x "$UCI_DIR/99-base"
+'
 
-# 9.2 Wi-Fi 最优配置
-cat > "$UCI_DIR/99-wifi" << 'EOF'
+# 9.2 WiFi ath11k NSS无线卸载优化
+write_uci "${UCI_BASE}/99-wifi" '
 #!/bin/sh
-for dev in $(uci show wireless | grep '=wifi-device' | cut -d. -f2 | cut -d= -f1); do
-    uci set wireless.$dev.disabled='0'
-    uci set wireless.$dev.country='CN'
-    uci set wireless.$dev.log_level='1'
-    uci set wireless.$dev.ath11k_nss_offload='1'
-    uci set wireless.$dev.mu_beamformer='1'
-    uci set wireless.$dev.mu_mimo_80211ax='1'
-    uci set wireless.$dev.he_su_beamformee='1'
-    uci set wireless.$dev.disable_11b='1'
-    uci set wireless.$dev.wmm='1'
+for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1); do
+    uci set wireless.$dev.disabled="0"
+    uci set wireless.$dev.country="CN"
+    uci set wireless.$dev.log_level="1"
+    uci set wireless.$dev.ath11k_nss_offload="1"
+    uci set wireless.$dev.mu_beamformer="1"
+    uci set wireless.$dev.mu_mimo_80211ax="1"
+    uci set wireless.$dev.he_su_beamformee="1"
+    uci set wireless.$dev.disable_11b="1"
+    uci set wireless.$dev.wmm="1"
 done
-for iface in $(uci show wireless | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1); do
-    uci set wireless.$iface.ssid='${WRT_SSID}'
-    uci set wireless.$iface.key='${WRT_WORD}'
-    uci set wireless.$iface.encryption='psk2+ccmp'
-    uci set wireless.$iface.apsd='0'
+for iface in $(uci show wireless | grep "=wifi-iface" | cut -d. -f2 | cut -d= -f1); do
+    uci set wireless.$iface.ssid="'${WRT_SSID}'"
+    uci set wireless.$iface.key="'${WRT_WORD}'"
+    uci set wireless.$iface.encryption="psk2+ccmp"
+    uci set wireless.$iface.apsd="0"
 done
 uci commit wireless
 exit 0
-EOF
-sed -i "s/\${WRT_SSID}/${WRT_SSID}/g; s/\${WRT_WORD}/${WRT_WORD}/g" "$UCI_DIR/99-wifi"
-chmod +x "$UCI_DIR/99-wifi"
+'
 
-# 9.3 防火墙 + NSS 卸载 + 硬件全锥 NAT + debugfs 兜底 + ECM 优化
-cat > "$UCI_DIR/99-firewall" << 'EOF'
+# 9.3 防火墙NSS硬件全锥NAT、ECM调优、bridge-nf关闭
+write_uci "${UCI_BASE}/99-firewall" '
 #!/bin/sh
-
+# 挂载debugfs用于ECM调参
 if ! mountpoint -q /sys/kernel/debug; then
     mount -t debugfs none /sys/kernel/debug 2>/dev/null && \
-        logger -t nss "✅ debugfs 挂载成功" || \
-        logger -t nss "⚠️ debugfs 挂载失败，NSS 调优项可能失效"
+        logger -t nss "✅ debugfs挂载成功" || \
+        logger -t nss "⚠️ debugfs挂载失败，ECM参数不生效"
 fi
 
+# 防火墙全局关闭软卸载，开启NSS硬件卸载
 uci -q get firewall.@defaults[0] || uci add firewall defaults
-uci set firewall.@defaults[0].flow_offloading='0'
-uci set firewall.@defaults[0].flow_offloading_hw='0'
-uci set firewall.@defaults[0].nss_offload='1'
-uci set firewall.@defaults[0].forward='ACCEPT'
-uci set firewall.@defaults[0].ipv6='1'
-uci set firewall.@defaults[0].syn_flood='0'
+uci set firewall.@defaults[0].flow_offloading="0"
+uci set firewall.@defaults[0].flow_offloading_hw="0"
+uci set firewall.@defaults[0].nss_offload="1"
+uci set firewall.@defaults[0].forward="ACCEPT"
+uci set firewall.@defaults[0].ipv6="1"
+uci set firewall.@defaults[0].syn_flood="0"
 uci commit firewall
 
-if [ -f /sys/kernel/debug/ecm/ecm_nss_ipv4/fullcone_enable ]; then
-    echo 1 > /sys/kernel/debug/ecm/ecm_nss_ipv4/fullcone_enable
-    logger -t nss "✅ NSS IPv4 硬件全锥 NAT 已开启"
-fi
-if [ -f /sys/kernel/debug/ecm/ecm_nss_ipv6/fullcone_enable ]; then
-    echo 1 > /sys/kernel/debug/ecm/ecm_nss_ipv6/fullcone_enable
-    logger -t nss "✅ NSS IPv6 硬件全锥 NAT 已开启"
+# ECM硬件全锥NAT开启
+[ -f /sys/kernel/debug/ecm/ecm_nss_ipv4/fullcone_enable ] && echo 1 > $_
+[ -f /sys/kernel/debug/ecm/ecm_nss_ipv6/fullcone_enable ] && echo 1 > $_
+
+# ECM TCP/UDP老化超时优化
+ECM_DIR=/sys/kernel/debug/ecm/ecm_nss_ipv4
+if [ -d "$ECM_DIR" ]; then
+    echo 30 > $ECM_DIR/tcp_syn_recv_timeout
+    echo 30 > $ECM_DIR/tcp_fin_wait_timeout
+    echo 120 > $ECM_DIR/tcp_time_wait_timeout
+    echo 60 > $ECM_DIR/udp_timeout
+    echo 1 > $ECM_DIR/accel_mode_nat_only
+    logger -t nss "✅ ECM流表老化策略优化完成"
 fi
 
-if [ -d /sys/kernel/debug/ecm/ecm_nss_ipv4 ]; then
-    echo 30 > /sys/kernel/debug/ecm/ecm_nss_ipv4/tcp_syn_recv_timeout
-    echo 30 > /sys/kernel/debug/ecm/ecm_nss_ipv4/tcp_fin_wait_timeout
-    echo 120 > /sys/kernel/debug/ecm/ecm_nss_ipv4/tcp_time_wait_timeout
-    echo 60 > /sys/kernel/debug/ecm/ecm_nss_ipv4/udp_timeout
-    echo 1 > /sys/kernel/debug/ecm/ecm_nss_ipv4/accel_mode_nat_only
-    logger -t nss "✅ ECM 流表老化策略已优化"
-fi
-
+# 关闭网桥iptables转发消耗CPU
 sysctl -w net.bridge.bridge-nf-call-iptables=0
 sysctl -w net.bridge.bridge-nf-call-ip6tables=0
-
 exit 0
-EOF
-chmod +x "$UCI_DIR/99-firewall"
+'
 
-# 9.4 CPU 调度器优化
-cat > "$UCI_DIR/99-cpufreq" << 'EOF'
+# 9.4 CPU调频脚本（修复原脚本游离代码问题）
+write_uci "${UCI_BASE}/99-cpufreq" '
 #!/bin/sh
+# CPU统一schedutil调频器，无则fallback ondemand
 for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
-    [ -d "$cpu" ] || continue
-    gov_file="$cpu/cpufreq/scaling_governor"
-    avail_file="$cpu/cpufreq/scaling_available_governors"
-    [ -f "$gov_file" ] || continue
-    if grep -q "schedutil" "$avail_file" 2>/dev/null; then
-        echo "schedutil" > "$gov_file" 2>/dev/null && \
-            logger -t cpufreq "✅ CPU ${cpu##*/}: schedutil 调度器" || \
-            logger -t cpufreq "⚠️ CPU ${cpu##*/}: schedutil 设置失败"
+    [ -f "$cpu/cpufreq/scaling_available_governors" ] || continue
+    if grep -q "schedutil" "$cpu/cpufreq/scaling_available_governors" 2>/dev/null; then
+        echo "schedutil" > "$cpu/cpufreq/scaling_governor" 2>/dev/null
+    else
+        echo "ondemand" > "$cpu/cpufreq/scaling_governor" 2>/dev/null
     fi
 done
-
-policy_dir="/sys/devices/system/cpu/cpufreq/policy0"
-if [ -d "$policy_dir" ]; then
-    echo 500 > "$policy_dir/schedutil/up_rate_limit_us" 2>/dev/null
-    echo 1000 > "$policy_dir/schedutil/down_rate_limit_us" 2>/dev/null
-    logger -t cpufreq "✅ schedutil 变频延迟已优化"
-fi
 exit 0
-EOF
-chmod +x "$UCI_DIR/99-cpufreq"
+'
 
-# 9.5 全自动中断均衡
-cat > "$UCI_DIR/99-irq" << 'EOF'
+# 9.5 IRQ均衡 + RPS/XPS网卡队列优化
+write_uci "${UCI_BASE}/99-irq" '
 #!/bin/sh
 /etc/init.d/irqbalance enable
 /etc/init.d/irqbalance start
-logger -t irq "✅ irqbalance 自动中断均衡服务已启动"
+logger -t irq "✅ irqbalance中断均衡启动完成"
 
-for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
-    [ -d "$iface" ] || continue
-    iface_name=$(basename "$iface")
-    for queue in "$iface"/queues/rx-*; do
-        [ -d "$queue" ] || continue
-        echo f > "$queue/rps_cpus" 2>/dev/null
-        echo 4096 > "$queue/rps_flow_cnt" 2>/dev/null
+# 网卡RPS接收队列分发
+for dev_path in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
+    [ -d "$dev_path" ] || continue
+    dev=$(basename "$dev_path")
+    for rxq in $dev_path/queues/rx-*; do
+        [ -d "$rxq" ] && echo f > $rxq/rps_cpus && echo 4096 > $rxq/rps_flow_cnt
     done
-    ip link set "$iface_name" txqueuelen 5000 2>/dev/null
-    logger -t irq "✅ ${iface_name} RPS 接收分发 + 队列长度已优化"
+    ip link set "$dev" txqueuelen 5000 2>/dev/null
 done
 
-for iface in br-lan br-wan; do
-    if [ -d "/sys/class/net/$iface" ]; then
-        for queue in /sys/class/net/$iface/queues/rx-*; do
-            [ -d "$queue" ] || continue
-            echo f > "$queue/rps_cpus" 2>/dev/null
-        done
-        logger -t irq "✅ ${iface} RPS 接收分发已开启"
-    fi
-done
-
-for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
-    [ -d "$iface" ] || continue
-    iface_name=$(basename "$iface")
-    for queue in "$iface"/queues/tx-*; do
-        [ -d "$queue" ] || continue
-        echo f > "$queue/xps_cpus" 2>/dev/null
+# 网桥RPS
+for br in br-lan br-wan; do
+    [ -d "/sys/class/net/$br" ] || continue
+    for rxq in /sys/class/net/$br/queues/rx-*; do
+        [ -d "$rxq" ] && echo f > $rxq/rps_cpus
     done
-    logger -t irq "✅ ${iface_name} XPS 发送分发已开启"
 done
 
+# XPS发送队列CPU分发
+for dev_path in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
+    [ -d "$dev_path" ] || continue
+    dev=$(basename "$dev_path")
+    for txq in $dev_path/queues/tx-*; do
+        [ -d "$txq" ] && echo f > $txq/xps_cpus
+    done
+done
 exit 0
-EOF
-chmod +x "$UCI_DIR/99-irq"
+'
 
-# 9.6 ZRAM 动态自适应
-cat > "$UCI_DIR/99-zram" << 'EOF'
+# 9.6 自适应ZRAM内存压缩
+write_uci "${UCI_BASE}/99-zram" '
 #!/bin/sh
-mem_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-mem_total_mb=$(( mem_total_kb / 1024 ))
-if [ "$mem_total_mb" -le 512 ]; then
-    zram_size=$(( mem_total_mb / 2 ))
-elif [ "$mem_total_mb" -lt 2048 ]; then
-    zram_size=$(( mem_total_mb / 4 ))
+mem_kb=$(grep MemTotal /proc/meminfo | awk "{print \$2}")
+mem_mb=$(( mem_kb / 1024 ))
+if [ $mem_mb -le 512 ]; then
+    zram=$(( mem_mb / 2 ))
+elif [ $mem_mb -lt 2048 ]; then
+    zram=$(( mem_mb / 4 ))
 else
-    zram_size=512
+    zram=512
 fi
-uci set zram.@zram[0].comp_algo='lz4'
-uci set zram.@zram[0].size="${zram_size}"
+uci set zram.@zram[0].comp_algo="lz4"
+uci set zram.@zram[0].size="$zram"
 uci commit zram
-logger -t zram "📦 物理内存 ${mem_total_mb}MB，自动设置 ZRAM 为 ${zram_size}MB (LZ4)"
+logger -t zram "内存${mem_mb}MB，自动分配ZRAM ${zram}MB LZ4压缩"
 /etc/init.d/zram restart
 exit 0
-EOF
-chmod +x "$UCI_DIR/99-zram"
+'
 
-green "✅ uci-defaults 全部配置写入完成"
+green "✅ 全部uci-defaults出厂脚本生成完成"
 
-# ---------- 9.5 init.d 开机脚本（永久保留） ----------
-green "=== 9.5 init.d 开机脚本 ==="
-INIT_DIR="./package/base-files/files/etc/init.d"
-mkdir -p "$INIT_DIR"
-
-cat > "$INIT_DIR/kick_nf_flow" << 'EOF'
+# ==================== 10. 开机init.d 冲突模块卸载 + 黑名单 ====================
+green "=== 10. 写入开机防冲突守护脚本 kick_nf_flow ==="
+INIT_SCRIPT="./package/base-files/files/etc/init.d/kick_nf_flow"
+cat > "${INIT_SCRIPT}" <<'EOF'
 #!/bin/sh /etc/rc.common
-
 START=99
+# 后置执行，等网卡/ECM加载完成再清理冲突模块
 
 start() {
     sleep 15
-    rmmod nft_flow_offload 2>/dev/null
-    rmmod nf_flow_table 2>/dev/null
-    rmmod net_selftests 2>/dev/null
+    # 卸载冲突流控驱动
+    rmmod nft_flow_offload nf_flow_table net_selftests 2>/dev/null
+    # 重启ECM确保NSS独占加速链路
     /etc/init.d/ecm restart 2>/dev/null || killall -9 ecm 2>/dev/null
-    if lsmod | grep -q "nf_flow\|nft_offload"; then
-        logger -t boot-kick "⚠️ 卸载失败，模块仍被使用"
+    if lsmod | grep -E "nf_flow|nft_offload"; then
+        logger -t boot-kick "⚠️ 流控模块卸载失败，存在占用冲突"
     else
-        logger -t boot-kick "✅ 冲突模块已卸载，NSS 独占硬件加速"
+        logger -t boot-kick "✅ 冲突软件流控模块清理完成，NSS独占硬件加速"
     fi
 }
 EOF
+chmod +x "${INIT_SCRIPT}"
 
-chmod +x "$INIT_DIR/kick_nf_flow"
-green "✅ kick_nf_flow 开机脚本已写入 $INIT_DIR"
+# 新增内核模块黑名单，永久阻止加载冲突驱动
+BLACKLIST_CONF="./package/base-files/files/etc/modprobe.d/nss-blacklist.conf"
+mkdir -p "$(dirname "$BLACKLIST_CONF")"
+cat > "$BLACKLIST_CONF" <<EOF
+blacklist nf_flow_table
+blacklist nft_flow_offload
+blacklist kmod-nf-flow
+blacklist kmod-nft-offload
+blacklist shortcut-fe
+blacklist fast-classifier
+EOF
+green "✅ 开机清理脚本+驱动黑名单写入完成"
 
-# ---------- 10. sysctl 网络与内存调优 ----------
-green "=== 10. sysctl 网络调优 ==="
-SYSCTL_CONF="./package/base-files/files/etc/sysctl.conf"
-mkdir -p "$(dirname "$SYSCTL_CONF")"
-if ! grep -q "nf_conntrack_max" "$SYSCTL_CONF" 2>/dev/null; then
-    cat >> "$SYSCTL_CONF" << 'EOF'
-# 连接跟踪优化（NSS 大并发场景）
+# ==================== 11. Sysctl 全局网络/内存内核调参 ====================
+green "=== 11. sysctl 网络并发、TCP BBR、内存优化参数写入 ==="
+SYSCTL_FILE="./package/base-files/files/etc/sysctl.conf"
+mkdir -p "$(dirname "$SYSCTL_FILE")"
+# 追加模式，避免覆盖用户原有配置
+cat >> "${SYSCTL_FILE}" <<'EOF'
+# NSS大并发连接跟踪调优
 net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 30
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
 net.netfilter.nf_conntrack_max = 262144
+
+# TCP缓冲区超大带宽优化
 net.core.rmem_default = 87380
 net.core.wmem_default = 87380
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
 net.ipv4.tcp_rmem = 4096 87380 67108864
 net.ipv4.tcp_wmem = 4096 65536 67108864
+
+# BBR拥塞控制、TCP快速打开
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.tcp_fastopen = 3
+
+# 网卡队列并发
 net.core.netdev_max_backlog = 5000
 net.core.rps_sock_flow_entries = 32768
+
+# 内存回收策略
 vm.min_free_kbytes = 16384
 vm.swappiness = 10
 vm.page-cluster = 3
+
+# 关闭网桥nf转发损耗CPU
 net.bridge.bridge-nf-call-iptables = 0
 net.bridge.bridge-nf-call-ip6tables = 0
 EOF
-    green "✅ sysctl 参数已写入"
-fi
+green "✅ sysctl全局网络调参写入完成"
 
-# ---------- 12. 最终校验 ----------
-green "=== 12. 最终校验 ==="
-ERRORS=0
+# ==================== 12. 最终配置完整性校验 ====================
+green "=== 12. 核心配置完整性校验 ==="
+ERR_CNT=0
 
-if grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config 2>/dev/null; then
-    red "❌ SQM 仍启用，与 NSS 冲突"
-    ERRORS=$((ERRORS + 1))
-fi
-if grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config 2>/dev/null; then
-    red "❌ turboacc 仍启用，与 NSS 冲突"
-    ERRORS=$((ERRORS + 1))
-fi
-if ! grep -q "^CONFIG_PACKAGE_kmod-qca-nss-ecm=y" .config 2>/dev/null; then
-    red "❌ NSS ECM 核心驱动未启用"
-    ERRORS=$((ERRORS + 1))
-fi
-if ! grep -q "^CONFIG_PACKAGE_kmod-qca-ssdk=y" .config 2>/dev/null; then
-    red "❌ SSDK 交换驱动未启用，NSS 无法生效"
-    ERRORS=$((ERRORS + 1))
-fi
-if grep -q "^CONFIG_PACKAGE_kmod-dsa-qca8k=y" .config 2>/dev/null; then
-    red "❌ DSA 驱动仍启用，与 NSS 冲突"
-    ERRORS=$((ERRORS + 1))
-fi
-grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config || { red "❌ 中文语言未启用"; ERRORS=$((ERRORS + 1)); }
+# 冲突包校验
+grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config && { red "❌ SQM软件流控未禁用"; ERR_CNT=$((ERR_CNT+1)); }
+grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config && { red "❌ TurboAcc冲突插件启用"; ERR_CNT=$((ERR_CNT+1)); }
+grep -q "^CONFIG_PACKAGE_kmod-dsa-qca8k=y" .config && { red "❌ DSA交换驱动未关闭"; ERR_CNT=$((ERR_CNT+1)); }
 
-[ $ERRORS -eq 0 ] && green "🎉 所有核心检查通过，NSS 12.5 配置无误" || { red "❌ 存在 ${ERRORS} 项错误，请修复后编译"; exit 1; }
+# 核心NSS依赖校验
+grep -q "^CONFIG_PACKAGE_kmod-qca-nss-ecm=y" .config || { red "❌ NSS ECM核心驱动缺失"; ERR_CNT=$((ERR_CNT+1)); }
+grep -q "^CONFIG_PACKAGE_kmod-qca-ssdk=y" .config || { red "❌ SSDK交换驱动缺失，NSS无法运行"; ERR_CNT=$((ERR_CNT+1)); }
+grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config || { red "❌ 简体中文未启用"; ERR_CNT=$((ERR_CNT+1)); }
+
+# 内核flow关闭校验
+for ck in "${FLOW_KERNEL_CONFS[@]}"; do
+    grep -q "^${ck}=y" .config && { red "❌ 内核流控参数 $ck 未关闭"; ERR_CNT=$((ERR_CNT+1)); }
+done
+
+if [[ $ERR_CNT -eq 0 ]]; then
+    green "🎉 全部校验通过，NSS12.5 IPQ60xx配置无冲突"
+else
+    red "❌ 检测到 ${ERR_CNT} 项配置错误，终止编译"
+    exit 1
+fi
 
 green ""
-green "========================================="
-green "✅ Settings.sh 执行完成，配置已就绪"
-green "========================================="
+green "============================================="
+green "✅ Settings.sh 配置脚本全部执行完毕，固件编译就绪"
+green "============================================="

@@ -161,7 +161,7 @@ jobs:
 
           $GITHUB_WORKSPACE/Scripts/Packages.sh
           $GITHUB_WORKSPACE/Scripts/Handles.sh
-          $GITHUB_WORKSPACE/Scripts/preset-adguard-core.sh
+          
           
       - name: Custom Settings  合并配置并执行
         run: |

@@ -29,10 +29,7 @@ CONFIG_PACKAGE_kmod-qca-nss-crypto=y
 CONFIG_PACKAGE_kmod-qca-nss-cfi=y
 CONFIG_PACKAGE_kmod-nss-ifb=n
 
-# ==================== 4.1 Multi Stream Daemon Lite 核心（无多余队列模块） ====================
-CONFIG_PACKAGE_multi-stream-daemon-lite=y
-CONFIG_PACKAGE_kmod-qca-msd-lite=y
-CONFIG_PACKAGE_kmod-netem=n
+
 
 # ==================== 5. NSS 隧道 & 管理模块 ====================
 CONFIG_PACKAGE_kmod-qca-nss-drv-gre=y
@@ -85,10 +82,8 @@ CONFIG_PACKAGE_kmod-ip6-tunnel=n
 CONFIG_PACKAGE_kmod-qca-nss-drv-tun6rd=n
 CONFIG_PACKAGE_kmod-qca-nss-drv-tunipip6=n
 
-# ==================== 11. 家用基础插件 + ADGuardHome ====================
-# ADG 核心
-CONFIG_PACKAGE_luci-app-adguardhome=y
-# ADG 依赖
+
+
 CONFIG_PACKAGE_curl=y
 CONFIG_PACKAGE_wget=y
 CONFIG_PACKAGE_ca-certificates=y

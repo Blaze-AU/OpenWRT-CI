@@ -50,24 +50,26 @@ set_config() {
     fi
 }
 
-# ==================== 1. 静态源码全局修改 ====================
+# ==================== 1. 静态源码全局修改（修复文件不存在sed报错） ====================
 green "=== 1. 源码模板全局替换 ==="
-# 移除默认ASU、替换默认主题、修改后台默认网关提示
-LUCI_COL=$(find ./feeds/luci/collections -name Makefile 2>/dev/null || true)
-if [[ -n "$LUCI_COL" ]]; then
-    sed -i "/attendedsysupgrade/d" "$LUCI_COL"
-    sed -i "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" "$LUCI_COL"
-fi
+# 移除默认ASU、替换默认主题，循环遍历所有Makefile，单个文件异常不中断脚本
+find ./feeds/luci/collections -name Makefile 2>/dev/null | while read -r mkf; do
+    sed -i "/attendedsysupgrade/d" "$mkf" || true
+    sed -i "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" "$mkf" || true
+done
 
+# 修改后台默认网关提示，仅文件存在时执行
 FLASH_JS=$(find ./feeds/luci/modules/luci-mod-system -name flash.js 2>/dev/null || true)
-[[ -n "$FLASH_JS" ]] && sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "$FLASH_JS"
+if [[ -f "$FLASH_JS" ]]; then
+    sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "$FLASH_JS" || true
+fi
 
 # 清理固件版本随机时间戳
 RELEASE_FILE="./package/base-files/files/etc/openwrt_release"
 if [[ -f "$RELEASE_FILE" ]]; then
-    sed -i -E 's|/ [0-9]{9}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}||g' "$RELEASE_FILE"
-    sed -i -E 's|-[0-9]{8}||g' "$RELEASE_FILE"
-    sed -i -E 's| [0-9]{9}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}||g' "$RELEASE_FILE"
+    sed -i -E 's|/ [0-9]{9}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}||g' "$RELEASE_FILE" || true
+    sed -i -E 's|-[0-9]{8}||g' "$RELEASE_FILE" || true
+    sed -i -E 's| [0-9]{9}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}||g' "$RELEASE_FILE" || true
     green "✅ 固件版本时间戳清理完成"
 fi
 

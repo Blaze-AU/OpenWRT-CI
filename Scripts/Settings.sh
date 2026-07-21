@@ -92,15 +92,21 @@ set_config CONFIG_CMA y
 set_config CONFIG_DMA_CMA y
 set_config CONFIG_CMA_SIZE_MBYTES 128
 
+# 开启RPS/XPS内核支持（解决软中断单核拥堵）
+set_config CONFIG_RPS y
+set_config CONFIG_XPS y
+set_config CONFIG_NET_RX_BUSY_POLL y
+set_config CONFIG_NETDEV_MAX_BACKLOG 16384
+
 # NSS全套加速驱动
 set_pkg \
     kmod-qca-nss-drv kmod-qca-nss-dp kmod-qca-nss-drv-pppoe \
     kmod-qca-nss-ecm kmod-qca-nss-ecm-premium kmod-qca-nss-crypto \
     kmod-qca-nss-cfi kmod-qca-nss-drv-bridge-mgr
 
-# DNS与基础服务
-set_pkg dnsmasq-full irqbalance zram kmod-tcp-bbr
-disable_pkg dnsmasq
+# DNS、基础网络服务
+set_pkg dnsmasq-full zram kmod-tcp-bbr
+disable_pkg dnsmasq irqbalance
 
 green "✅ NSS12.5 核心套件加载完成"
 
@@ -184,7 +190,7 @@ EOF
     chmod +x "${fpath}"
 }
 
-# 9.1 基础网络、主机名、IPv6默认
+# 9.1 基础网络、主机名、IPv6默认（移除ADG DNS相关代码）
 write_uci "${UCI_BASE}/99-base" '
 #!/bin/sh
 uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr="'${WRT_IP}'"; uci commit network; }
@@ -224,7 +230,7 @@ uci commit wireless
 exit 0
 '
 
-# 9.3 防火墙NSS硬件全锥NAT、ECM调优、bridge-nf关闭
+# 9.3 防火墙NSS硬件全锥NAT、ECM流表扩容、bridge-nf关闭（移除MSD调参）
 write_uci "${UCI_BASE}/99-firewall" '
 #!/bin/sh
 # 挂载debugfs用于ECM调参
@@ -248,15 +254,22 @@ uci commit firewall
 [ -f /sys/kernel/debug/ecm/ecm_nss_ipv4/fullcone_enable ] && echo 1 > $_
 [ -f /sys/kernel/debug/ecm/ecm_nss_ipv6/fullcone_enable ] && echo 1 > $_
 
+# ECM流表扩容，防并发丢包
+ECM4=/sys/kernel/debug/ecm/ecm_nss_ipv4
+ECM6=/sys/kernel/debug/ecm/ecm_nss_ipv6
+[ -d "$ECM4" ] && echo 65536 > $ECM4/max_entries
+[ -d "$ECM6" ] && echo 32768 > $ECM6/max_entries
+[ -d "$ECM4" ] && echo 70 > $ECM4/reclaim_threshold
+[ -d "$ECM6" ] && echo 70 > $ECM6/reclaim_threshold
+
 # ECM TCP/UDP老化超时优化
-ECM_DIR=/sys/kernel/debug/ecm/ecm_nss_ipv4
-if [ -d "$ECM_DIR" ]; then
-    echo 30 > $ECM_DIR/tcp_syn_recv_timeout
-    echo 30 > $ECM_DIR/tcp_fin_wait_timeout
-    echo 120 > $ECM_DIR/tcp_time_wait_timeout
-    echo 60 > $ECM_DIR/udp_timeout
-    echo 1 > $ECM_DIR/accel_mode_nat_only
-    logger -t nss "✅ ECM流表老化策略优化完成"
+if [ -d "$ECM4" ]; then
+    echo 30 > $ECM4/tcp_syn_recv_timeout
+    echo 30 > $ECM4/tcp_fin_wait_timeout
+    echo 120 > $ECM4/tcp_time_wait_timeout
+    echo 60 > $ECM4/udp_timeout
+    echo 1 > $ECM4/accel_mode_nat_only
+    logger -t nss "✅ ECM流表扩容+老化策略优化完成"
 fi
 
 # 关闭网桥iptables转发消耗CPU
@@ -265,7 +278,7 @@ sysctl -w net.bridge.bridge-nf-call-ip6tables=0
 exit 0
 '
 
-# 9.4 CPU调频脚本（修复原脚本游离代码问题）
+# 9.4 CPU调频脚本
 write_uci "${UCI_BASE}/99-cpufreq" '
 #!/bin/sh
 # CPU统一schedutil调频器，无则fallback ondemand
@@ -280,39 +293,49 @@ done
 exit 0
 '
 
-# 9.5 IRQ均衡 + RPS/XPS网卡队列优化
+# 9.5 IRQ深度优化：禁用irqbalance、NSS中断自动均分、RPS分流至CPU1/2/3解决单核拥堵丢包
 write_uci "${UCI_BASE}/99-irq" '
 #!/bin/sh
-/etc/init.d/irqbalance enable
-/etc/init.d/irqbalance start
-logger -t irq "✅ irqbalance中断均衡启动完成"
+# 关闭irqbalance，避免覆盖NSS中断CPU亲和绑定
+/etc/init.d/irqbalance stop
+/etc/init.d/irqbalance disable
 
-# 网卡RPS接收队列分发
-for dev_path in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
-    [ -d "$dev_path" ] || continue
+# 1. NSS硬件队列中断多核均分
+CPU_MASK=(1 2 4 8)
+idx=0
+while read irq_num; do
+    echo "${CPU_MASK[$idx]}" > /proc/irq/$irq_num/smp_affinity_list 2>/dev/null
+    idx=$((idx+1))
+done < <(grep nss_queue /proc/interrupts | awk "{sub(/:/,\"\",\$1); print \$1}")
+
+# 2. RPS分流接收软中断到CPU1/2/3，避开拥堵CPU0
+RPS_MASK="e"
+XPS_MASK="f"
+for dev_path in /sys/class/net/*; do
     dev=$(basename "$dev_path")
+    [ "$dev" = "lo" ] && continue
+    # RPS 接收分发
     for rxq in $dev_path/queues/rx-*; do
-        [ -d "$rxq" ] && echo f > $rxq/rps_cpus && echo 4096 > $rxq/rps_flow_cnt
+        [ -d "$rxq" ] && echo "$RPS_MASK" > $rxq/rps_cpus && echo 8192 > $rxq/rps_flow_cnt
     done
-    ip link set "$dev" txqueuelen 5000 2>/dev/null
-done
-
-# 网桥RPS
-for br in br-lan br-wan; do
-    [ -d "/sys/class/net/$br" ] || continue
-    for rxq in /sys/class/net/$br/queues/rx-*; do
-        [ -d "$rxq" ] && echo f > $rxq/rps_cpus
-    done
-done
-
-# XPS发送队列CPU分发
-for dev_path in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
-    [ -d "$dev_path" ] || continue
-    dev=$(basename "$dev_path")
+    # XPS 发送分发
     for txq in $dev_path/queues/tx-*; do
-        [ -d "$txq" ] && echo f > $txq/xps_cpus
+        [ -d "$txq" ] && echo "$XPS_MASK" > $txq/xps_cpus
     done
+    # 扩大网卡发送队列
+    ip link set "$dev" txqueuelen 8192 2>/dev/null
 done
+
+# 3. 全局网络缓冲区扩容缓解瞬时流量冲击
+sysctl -w net.core.netdev_max_backlog=16384
+sysctl -w net.core.rps_sock_flow_entries=65536
+sysctl -w net.ipv4.softnet_budget=1024
+sysctl -w net.core.dev_weight=2048
+
+# 均衡TASKLET调度
+echo 3 > /sys/module/workqueue/parameters/cpu_mask
+
+logger -t irq-fix "✅ NSS中断多核均分+RPS分流完成，解除CPU0软中断拥堵丢包"
 exit 0
 '
 
@@ -374,7 +397,7 @@ blacklist fast-classifier
 EOF
 green "✅ 开机清理脚本+驱动黑名单写入完成"
 
-# ==================== 11. Sysctl 全局网络/内存内核调参 ====================
+# ==================== 11. Sysctl 全局网络/内存内核调参（升级缓冲区） ====================
 green "=== 11. sysctl 网络并发、TCP BBR、内存优化参数写入 ==="
 SYSCTL_FILE="./package/base-files/files/etc/sysctl.conf"
 mkdir -p "$(dirname "$SYSCTL_FILE")"
@@ -397,9 +420,9 @@ net.ipv4.tcp_wmem = 4096 65536 67108864
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.tcp_fastopen = 3
 
-# 网卡队列并发
-net.core.netdev_max_backlog = 5000
-net.core.rps_sock_flow_entries = 32768
+# 网卡队列并发扩容，防瞬时丢包
+net.core.netdev_max_backlog = 16384
+net.core.rps_sock_flow_entries = 65536
 
 # 内存回收策略
 vm.min_free_kbytes = 16384
@@ -420,6 +443,7 @@ ERR_CNT=0
 grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config && { red "❌ SQM软件流控未禁用"; ERR_CNT=$((ERR_CNT+1)); }
 grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config && { red "❌ TurboAcc冲突插件启用"; ERR_CNT=$((ERR_CNT+1)); }
 grep -q "^CONFIG_PACKAGE_kmod-dsa-qca8k=y" .config && { red "❌ DSA交换驱动未关闭"; ERR_CNT=$((ERR_CNT+1)); }
+grep -q "^CONFIG_PACKAGE_irqbalance=y" .config && { red "❌ irqbalance 未禁用，会破坏NSS中断均衡"; ERR_CNT=$((ERR_CNT+1)); }
 
 # 核心NSS依赖校验
 grep -q "^CONFIG_PACKAGE_kmod-qca-nss-ecm=y" .config || { red "❌ NSS ECM核心驱动缺失"; ERR_CNT=$((ERR_CNT+1)); }
@@ -432,7 +456,7 @@ for ck in "${FLOW_KERNEL_CONFS[@]}"; do
 done
 
 if [[ $ERR_CNT -eq 0 ]]; then
-    green "🎉 全部校验通过，NSS12.5 IPQ60xx配置无冲突"
+    green "🎉 全部校验通过，NSS12.5配置无冲突，中断均衡防丢包优化已内置"
 else
     red "❌ 检测到 ${ERR_CNT} 项配置错误，终止编译"
     exit 1

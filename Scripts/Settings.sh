@@ -45,22 +45,19 @@ set_config() {
     fi
 }
 
-# ==================== 1. 源码模板全局替换（固化IP/主机名/无线日志） ====================
+# ==================== 1. 源码模板全局替换 ====================
 green "=== 1. 源码模板全局替换 ==="
-# 替换默认后台网关
 find ./feeds/luci/collections -name Makefile 2>/dev/null | while read -r mkf; do
     sed -i '/attendedsysupgrade/d' "${mkf}" || true
     sed -i "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" "${mkf}" || true
 done
 
-# 后台登录页默认IP替换
 FLASH_JS=$(find ./feeds/luci/modules/luci-mod-system -name flash.js 2>/dev/null || true)
 if [[ -f "${FLASH_JS}" ]]; then
     sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "${FLASH_JS}" || true
     green "✅ flash.js 后台默认网关已替换为 ${WRT_IP}"
 fi
 
-# 初始化脚本默认LAN地址、主机名替换
 CFG_GEN="./package/base-files/files/bin/config_generate"
 if [[ -f "${CFG_GEN}" ]]; then
     sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "${CFG_GEN}" || true
@@ -68,14 +65,12 @@ if [[ -f "${CFG_GEN}" ]]; then
     green "✅ config_generate 默认IP、主机名固化完成"
 fi
 
-# 固件版本清理，去除编译时间戳
 RELEASE_FILE="./package/base-files/files/etc/openwrt_release"
 if [[ -f "${RELEASE_FILE}" ]]; then
     sed -i -E 's/ r[0-9a-f]+|\(HEAD detached at [0-9a-f]+\)| branch |~[0-9a-f]+//g; s/  +/ /g' "${RELEASE_FILE}" || true
     green "✅ 固件版本冗余时间戳清理完成"
 fi
 
-# hostapd底层模板全局降低无线日志等级，彻底关闭驱动调试打印
 HOSTAPD_TPL="./package/wireless/files/hostapd.sh"
 if [[ -f "${HOSTAPD_TPL}" ]]; then
     sed -i 's/set_default log_level 2/set_default log_level 3/g' "${HOSTAPD_TPL}"
@@ -87,7 +82,7 @@ if [[ -f "${HOSTAPD_TPL}" ]]; then
     sed -i 's/set_default log_iapp   1/set_default log_iapp   0/g' "${HOSTAPD_TPL}"
     sed -i 's/set_default log_mlme   1/set_default log_mlme   0/g' "${HOSTAPD_TPL}"
     sed -i '/log_rate_control/d; /log_data_path/d' "${HOSTAPD_TPL}"
-    green "✅ hostapd 底层无线调试日志全部关闭，释放CPU中断"
+    green "✅ hostapd 底层无线调试日志全部关闭"
 fi
 
 # ==================== 2. LuCI主题与中文语言 ====================
@@ -98,32 +93,26 @@ green "✅ 主题+简体中文语言包已启用"
 
 # ==================== 3. NSS 12.5 IPQ60xx 全套硬件加速 ====================
 green "=== 3. NSS 12.5 硬件加速核心锁定 ==="
-# 交换驱动：SSDK启用，DSA彻底禁用
 set_pkg kmod-qca-ssdk
 disable_pkg kmod-dsa-qca8k
 
-# NSS固件微码
 set_config CONFIG_NSS_FIRMWARE_VERSION_12_5 y
 set_pkg nss-firmware-ipq60xx nss-eip-firmware
 
-# CMA内存预留
 set_config CONFIG_CMA y
 set_config CONFIG_DMA_CMA y
 set_config CONFIG_CMA_SIZE_MBYTES 128
 
-# 多核网络分流
 set_config CONFIG_RPS y
 set_config CONFIG_XPS y
 set_config CONFIG_NET_RX_BUSY_POLL y
 set_config CONFIG_NETDEV_MAX_BACKLOG 16384
 
-# NSS完整驱动套件
 set_pkg \
     kmod-qca-nss-drv kmod-qca-nss-dp kmod-qca-nss-drv-qdisc \
     kmod-qca-nss-drv-pppoe kmod-qca-nss-ecm kmod-qca-nss-ecm-premium \
     kmod-qca-nss-crypto kmod-qca-nss-cfi kmod-qca-nss-drv-bridge-mgr
 
-# 基础网络工具、日志轮转、TCP BBR、证书套件（对齐你的.config）
 set_pkg dnsmasq-full zram kmod-tcp-bbr ca-bundle logrotate
 set_pkg curl wget iputils-arping etherwake iperf3 htop coremark bash
 set_pkg ttyd libwebsockets-full odhcpd odhcp6c luci-proto-ipv6
@@ -132,7 +121,7 @@ set_pkg zerotier kmod-tun
 disable_pkg dnsmasq irqbalance
 green "✅ NSS全套硬件加速、配套工具包加载完成"
 
-# ==================== 4. 冲突组件全局屏蔽（与NSS互斥） ====================
+# ==================== 4. 冲突组件全局屏蔽 ====================
 green "=== 4. 软件流控/USB/冗余驱动全局禁用 ==="
 disable_pkg \
     sqm-scripts sqm-scripts-nss luci-app-sqm luci-app-turboacc \
@@ -140,17 +129,14 @@ disable_pkg \
     kmod-nf-flow kmod-nft-fullcone kmod-nss-ifb kmod-net-selftests \
     kmod-bonding kmod-macvlan kmod-br-netfilter
 
-# 完整USB全家桶裁剪，精简固件体积
 disable_pkg \
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
     kmod-usb-dwc3 kmod-usb-dwc3-qcom block-mount automount \
     f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 
-# 多余IPv6隧道模块裁剪
 disable_pkg 6rd kmod-nat46 kmod-sit kmod-ip6-tunnel kmod-qca-nss-drv-tun6rd kmod-qca-nss-drv-tunipip6
 disable_pkg luci-app-attendedsysupgrade FEED_video kmod-qca-nss-drv-wifi-meshmgr kmod-qca-nss-drv-lag-mgr
 
-# 内核层彻底阻断软件流表转发（双重保险）
 FLOW_KERNEL_LIST=(
     CONFIG_NF_FLOW_TABLE CONFIG_NF_FLOW_TABLE_IPV4 CONFIG_NF_FLOW_TABLE_IPV6
     CONFIG_NF_FLOW_TABLE_INET CONFIG_NFT_FLOW_OFFLOAD CONFIG_NETFILTER_XT_MATCH_FLOW
@@ -160,11 +146,9 @@ for item in "${FLOW_KERNEL_LIST[@]}"; do
     set_config "${item}" n
 done
 
-# 移除无用软件QoS内核参数（固件无debugfs，完全无效）
 set_config CONFIG_KERNEL_NET_SCH_FQ_CODEL n
 set_config CONFIG_KERNEL_NET_SCH_TBF n
 
-# nftables基础防火墙模块
 set_pkg kmod-ipt-core kmod-nf-ipt kmod-nf-nat
 green "✅ 所有与NSS冲突的软件转发组件已屏蔽"
 
@@ -186,7 +170,7 @@ green "=== 7. make defconfig 自动解析依赖 ==="
 make defconfig >/dev/null 2>&1 || { red "❌ make defconfig 执行失败，脚本终止"; exit 1; }
 green "✅ 内核/软件包依赖自动补齐"
 
-# ==================== 8. 二次硬阻断流控模块（防止defconfig自动恢复） ====================
+# ==================== 8. 二次硬阻断流控模块 ====================
 green "=== 8. 二次屏蔽软件流控，防止defconfig自动开启 ==="
 for item in "${FLOW_KERNEL_LIST[@]}"; do
     set_config "${item}" n
@@ -203,7 +187,6 @@ green "=== 9. 生成出厂固化uci-defaults脚本 ==="
 UCI_DEFAULT_ROOT="./package/base-files/files/etc/uci-defaults"
 mkdir -p "${UCI_DEFAULT_ROOT}"
 
-# 工具：生成可执行uci脚本
 write_uci() {
     local fpath="$1"
     shift
@@ -215,58 +198,52 @@ EOF
     chmod +x "${fpath}"
 }
 
-# 9.1 网络/DNS/IPv6固化，关闭DNS日志防闪存爆满
+# 9.1 网络/DNS/IPv6固化
 write_uci "${UCI_DEFAULT_ROOT}/99-base-network" '
-# LAN网关、主机名固化
 uci -q get network.lan.ipaddr || uci set network.lan.ipaddr="'${WRT_IP}'"
 uci -q get system.@system[0].hostname || uci set system.@system[0].hostname="'${WRT_NAME}'"
 uci set network.wan.mtu="1492"
 
-# IPv6基础配置
 uci set network.wan.ipv6="auto"
 uci set dhcp.lan.ra="hybrid"
 uci set dhcp.lan.dhcpv6="hybrid"
 uci set dhcp.lan.ndp="relay"
 uci set dhcp.lan.ndp_mode="relay"
-
-# 修复odhcpd Invalid ndp mode报错
-uci set dhcp.lan.ndp="relay"
 uci set dhcp.lan.ndp_relay="1"
 uci set dhcp.lan.force="1"
 uci set dhcp.lan.start="100"
 uci set dhcp.lan.limit="150"
 uci set dhcp.lan.leasetime="12h"
 
-# DNS并发上限，多设备不卡顿
 uci set dhcp.@dnsmasq[0].maxconcurrent=500
+uci set dhcp.@dnsmasq[0].cache-size="8000"
+uci set dhcp.@dnsmasq[0].min-cache-ttl="3600"
+uci set dhcp.@dnsmasq[0].edns-packet-max="1232"
+uci set dhcp.@dnsmasq[0].bogus_priv="1"
+uci set dhcp.@dnsmasq[0].stop_rebind="1"
 
-# 固化上游公共DNS，拒绝运营商劫持
-uci set network.wan.dns="223.5.5.5 114.114.114.114 8.8.8.8"
+uci set network.wan.dns="223.5.5.5 119.29.29.29 180.76.76.76"
 uci set dhcp.@dnsmasq[0].logqueries="0"
-uci set dhcp.@dnsmasq[0].logfacility="0"
+uci del dhcp.@dnsmasq[0].logfacility 2>/dev/null
 uci del dhcp.odhcpd.leasetrigger 2>/dev/null
 
-# 兜底静态DNS配置
 echo "nameserver 223.5.5.5
-nameserver 114.114.114.114
-nameserver 8.8.8.8" > /tmp/resolv.conf.d/resolv.conf.auto
+nameserver 119.29.29.29
+nameserver 180.76.76.76" > /tmp/resolv.conf.d/resolv.conf.auto
 
 uci commit network
 uci commit dhcp
 /etc/init.d/dnsmasq reload
 '
 
-# 9.2 无线核心优化（根治800M跌到500M，适配ath11k phyX-ap0命名，移除所有debugfs代码）
+# 9.2 无线核心优化（修复：txqueuelen 在 wifi reload 后设置，移除无效 distance）
 write_uci "${UCI_DEFAULT_ROOT}/99-wifi-stable" '
-#!/bin/sh
-# 全局射频稳定参数，关闭激进MU/OFDMA，固定80M频宽无跳信道
 for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1); do
     uci set wireless.${dev}.disabled="0"
     uci set wireless.${dev}.country="CN"
     uci set wireless.${dev}.log_level="3"
     uci set wireless.${dev}.ath11k_nss_offload="1"
     uci set wireless.${dev}.mu_beamformer="1"
-    # 关键：关闭激进MU-MIMO，单设备SU优先，杜绝速率断崖下跌
     uci set wireless.${dev}.mu_mimo_80211ax="0"
     uci set wireless.${dev}.he_su_beamformee="1"
     uci set wireless.${dev}.disable_11b="1"
@@ -274,11 +251,9 @@ for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1
     uci set wireless.${dev}.htmode="VHT80"
     uci set wireless.${dev}.dfs="0"
     uci set wireless.${dev}.txpower="20"
-    # 关闭OFDMA，多设备并发调度冲突元凶
     uci set wireless.${dev}.ofdma="0"
 done
 
-# 无线接口关闭终端省电、APSD休眠导致降速
 for iface in $(uci show wireless | grep "=wifi-iface" | cut -d. -f2 | cut -d= -f1); do
     uci set wireless.${iface}.ssid="'${WRT_SSID}'"
     uci set wireless.${iface}.key="'${WRT_WORD}'"
@@ -288,32 +263,27 @@ for iface in $(uci show wireless | grep "=wifi-iface" | cut -d. -f2 | cut -d= -f
 done
 uci commit wireless
 
-# 彻底关闭ath11k驱动底层所有调试日志，释放CPU中断资源
 echo 0 > /sys/module/ath11k/parameters/debug_mask
 
-# 自动遍历所有AP虚拟网卡扩容TX发送队列（适配phy0-ap0命名）
-for wdev in $(iw dev 2>/dev/null | grep Interface | awk "{print \$2}"); do
-    ip link set ${wdev} txqueuelen 8192 2>/dev/null
-done
-
-# 底层射频关闭RTS保护，减少重传导致MCS降级
+# 关闭 RTS（可选）
 iw phy phy0 set rts off 2>/dev/null
 iw phy phy1 set rts off 2>/dev/null
 
-# 5G射频设置200米覆盖距离，优化ACK超时，远距离不丢包降速
-iw phy phy0 set distance 200 2>/dev/null
-
-# 均衡所有在线终端空口权重，防止单设备带宽被瓜分
+# 设置 airtime_weight（若有工作站）
 for sta_mac in $(iw dev phy0-ap0 station dump 2>/dev/null | grep Station | awk "{print \$2}"); do
     iw dev phy0-ap0 station set ${sta_mac} airtime_weight 100
 done
 
+# 关键：先重启无线，再设置 txqueuelen（此时接口已存在）
 wifi reload
+sleep 2
+for wdev in $(iw dev 2>/dev/null | grep Interface | awk "{print \$2}"); do
+    ip link set ${wdev} txqueuelen 8192 2>/dev/null
+done
 '
 
-# 9.3 防火墙优化，删除废弃NSS参数、关闭bridge iptables抢占CPU
+# 9.3 防火墙优化
 write_uci "${UCI_DEFAULT_ROOT}/99-firewall-nss" '
-# 清理fw4废弃nss_offload参数，消除日志告警
 uci -q get firewall.@defaults[0] || uci add firewall defaults
 uci del firewall.@defaults[0].nss_offload 2>/dev/null
 uci del firewall.@defaults[0].ipv6 2>/dev/null
@@ -323,40 +293,31 @@ uci set firewall.@defaults[0].forward="ACCEPT"
 uci set firewall.@defaults[0].syn_flood="0"
 uci commit firewall
 
-# 关闭网桥iptables转发，减少CPU开销
 sysctl -w net.bridge.bridge-nf-call-iptables=0
 sysctl -w net.bridge.bridge-nf-call-ip6tables=0
 
-# 开机卸载残留软件流控模块，保障NSS独占转发
 rmmod nft_flow_offload nf_flow_table net_selftests 2>/dev/null
 if lsmod | grep -E "nf_flow|nft_flow"; then
     logger -t firewall "⚠️ 软件流控模块未卸载，尝试二次清理"
 fi
 '
 
-# 9.4 IRQ多核均衡，NSS中断隔离不抢占无线算力
+# 9.4 IRQ多核均衡（动态绑定，自动匹配）
 write_uci "${UCI_DEFAULT_ROOT}/99-irq-smp" '
-# 关闭irqbalance，手动绑定NSS中断至独立核心
 /etc/init.d/irqbalance stop
 /etc/init.d/irqbalance disable
 
-# NSS中断绑定至CPU1/2/3，0号核心留给无线
-echo 1 > /proc/irq/39/smp_affinity
-echo 2 > /proc/irq/40/smp_affinity
-echo 4 > /proc/irq/41/smp_affinity
-echo 8 > /proc/irq/42/smp_affinity
+# 动态绑定 NSS 中断到不同 CPU（轮询分配）
+for irq in $(grep -E "nss_queue" /proc/interrupts | cut -d: -f1); do
+    core=$((irq % 4))
+    echo $((1 << core)) > /proc/irq/${irq}/smp_affinity
+done
 
-# 全局网络缓冲扩容
-sysctl -w net.core.netdev_max_backlog=16384
-sysctl -w net.core.rps_sock_flow_entries=16384
-sysctl -w net.core.dev_weight=256
-
-# 任务调度均衡
-echo 3 > /sys/module/workqueue/parameters/cpu_mask
-logger -t irq-fix "✅ NSS中断多核绑定完成，无线算力隔离"
+# 全局网络缓冲（已在 sysctl 中设置，此处不重复）
+logger -t irq-fix "✅ NSS中断多核绑定已完成（动态）"
 '
 
-# 9.5 ZRAM自适应LZ4内存压缩，低内存不OOM
+# 9.5 ZRAM自适应
 write_uci "${UCI_DEFAULT_ROOT}/99-zram-mem" '
 mem_kb=$(grep MemTotal /proc/meminfo | awk "{print \$2}")
 mem_mb=$((mem_kb / 1024))
@@ -375,17 +336,16 @@ uci commit zram
 logger -t zram "内存${mem_mb}MB，自动分配ZRAM ${swap_size}MB LZ4压缩"
 '
 
-# 9.6 系统环形日志限流8MB，防止闪存占满
+# 9.6 系统日志限流
 write_uci "${UCI_DEFAULT_ROOT}/99-log-limit" '
 uci set system.@system[0].log_size="8192"
 uci set system.@system[0].log_file=""
 uci commit system
-# 开机清理旧警告日志
 logread | grep -v warn > /tmp/log_clean.tmp && logread -c && cat /tmp/log_clean.tmp | logger
 rm -f /tmp/log_clean.tmp
 '
 
-# 9.7 logrotate 日志轮转配置，单文件512k封顶，保留2份压缩备份
+# 9.7 logrotate 日志轮转
 LOGROTATE_CONF="./package/base-files/files/etc/logrotate.d/custom-wifi"
 mkdir -p "$(dirname ${LOGROTATE_CONF})"
 cat > "${LOGROTATE_CONF}" <<'EOF'
@@ -403,36 +363,38 @@ cat > "${LOGROTATE_CONF}" <<'EOF'
 }
 EOF
 chmod 644 "${LOGROTATE_CONF}"
-green "✅ logrotate 日志轮转配置写入完成，限制单日志512k"
+green "✅ logrotate 日志轮转配置写入完成"
 
-# 9.8 无线速率看门狗定时任务，每15分钟检测低速自动重载射频
-CRON_ROOT="./package/base-files/files/etc/crontabs/root"
-mkdir -p "$(dirname ${CRON_ROOT})"
-cat >> "${CRON_ROOT}" <<'EOF'
-# 无线速率看门狗，5G协商速率低于600M自动重载射频修复卡顿
-*/15 * * * * wdev=$(iw dev | grep phy0-ap0 | awk '{print $2}'); if [ -n "${wdev}" ]; then low_rate=$(iw dev ${wdev} station dump 2>/dev/null | grep "tx bitrate" | awk '{print int($3)}'); if [ -n "${low_rate}" ] && [ ${low_rate} -lt 600 ]; then logger -t wifi-watchdog "5G速率过低${low_rate}Mbps，重载射频"; wifi reload; fi; fi
-# 每6小时轻量重载无线，清除长期缓存堆积
-0 */6 * * * wifi reload
-EOF
-green "✅ 无线看门狗定时任务写入，自动修复长期运行速率跳水"
+# ==================== NSS PBUF 性能调度优化 ====================
+update_nss_pbuf_performance() {
+    local conf="./package/kernel/mac80211/files/pbuf.uci"
+    if [ -f "$conf" ]; then
+        sed -i "s/auto_scale '1'/auto_scale 'off'/g" "$conf" 2>/dev/null
+        sed -i "s/scaling_governor 'performance'/scaling_governor 'schedutil'/g" "$conf" 2>/dev/null
+        green "✅ NSS PBUF: 自动缩放关闭，CPU调度器切换 schedutil"
+    fi
+}
+update_nss_pbuf_performance
 
-# 9.9 APK软件源固化，消除404下载报错
+# ==================== APK软件源（动态版本，避免硬编码） ====================
+green "=== 配置 APK 软件源 ==="
 APK_REPO="./package/base-files/files/etc/apk/repositories.d/dist.conf"
 mkdir -p "$(dirname ${APK_REPO})"
-cat > "${APK_REPO}" <<'EOF'
-https://downloads.immortalwrt.org/releases/25.10-SNAPSHOT/targets/qualcommax/ipq60xx/packages
-https://downloads.immortalwrt.org/releases/25.10-SNAPSHOT/packages/aarch64_cortex-a53/base
-https://downloads.immortalwrt.org/releases/25.10-SNAPSHOT/packages/aarch64_cortex-a53/luci
-https://downloads.immortalwrt.org/releases/25.10-SNAPSHOT/packages/aarch64_cortex-a53/packages
-https://downloads.immortalwrt.org/releases/25.10-SNAPSHOT/packages/aarch64_cortex-a53/routing
-https://downloads.immortalwrt.org/releases/25.10-SNAPSHOT/packages/aarch64_cortex-a53/telephony
+# 尝试从 .config 读取版本，若失败则使用默认 snapshot
+VERSION=$(grep -E '^VERSION' .config 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "25.10-SNAPSHOT")
+cat > "${APK_REPO}" <<EOF
+https://downloads.immortalwrt.org/releases/${VERSION}/targets/qualcommax/ipq60xx/packages
+https://downloads.immortalwrt.org/releases/${VERSION}/packages/aarch64_cortex-a53/base
+https://downloads.immortalwrt.org/releases/${VERSION}/packages/aarch64_cortex-a53/luci
+https://downloads.immortalwrt.org/releases/${VERSION}/packages/aarch64_cortex-a53/packages
+https://downloads.immortalwrt.org/releases/${VERSION}/packages/aarch64_cortex-a53/routing
+https://downloads.immortalwrt.org/releases/${VERSION}/packages/aarch64_cortex-a53/telephony
 EOF
 rm -f ./package/base-files/files/etc/apk/repositories
 ln -sf "${APK_REPO}" ./package/base-files/files/etc/apk/repositories
+green "✅ APK 软件源配置完成（版本: ${VERSION}）"
 
-green "✅ 全部uci-defaults出厂固化脚本生成完毕"
-
-# ==================== 10. 开机模块黑名单，彻底屏蔽软件流控 ====================
+# ==================== 10. 开机模块黑名单 ====================
 green "=== 10. 驱动黑名单，永久屏蔽软件转发模块 ==="
 BLACKLIST_CONF="./package/base-files/files/etc/modprobe.d/nss-blacklist.conf"
 mkdir -p "$(dirname ${BLACKLIST_CONF})"
@@ -446,7 +408,6 @@ blacklist fast-classifier
 EOF
 chmod 644 "${BLACKLIST_CONF}"
 
-# 开机初始化脚本，启动时卸载冲突模块
 INIT_KICK="./package/base-files/files/etc/init.d/kick-nss-clean"
 cat > "${INIT_KICK}" <<'EOF'
 #!/bin/sh /etc/rc.common
@@ -464,7 +425,6 @@ green "=== 11. sysctl 全局TCP/内存优化 ==="
 SYSCTL_FILE="./package/base-files/files/etc/sysctl.d/99-network-tune.conf"
 mkdir -p "$(dirname ${SYSCTL_FILE})"
 cat > "${SYSCTL_FILE}" <<'EOF'
-# TCP大缓冲，千兆无线吞吐拉满
 net.netfilter.nf_conntrack_tcp_timeout_syn_recv=30
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait=30
 net.netfilter.nf_conntrack_max=262144
@@ -483,40 +443,34 @@ net.core.netdev_max_backlog=16384
 net.core.rps_sock_flow_entries=16384
 net.core.dev_weight=256
 
-# 关闭网桥iptables转发，降低CPU占用
 net.bridge.bridge-nf-call-iptables=0
 net.bridge.bridge-nf-call-ip6tables=0
 EOF
 green "✅ sysctl TCP/内存优化配置写入完成"
 
-# ==================== 12. 编译前完整性校验（新增无线专项检测） ====================
+# ==================== 12. 编译前完整性校验 ====================
 green "=== 12. 编译前配置完整性校验 ==="
 ERR_COUNT=0
 
-# 软件流控冲突包检测
 grep -q "^CONFIG_PACKAGE_sqm-scripts=y" .config && { red "❌ SQM软件流控未禁用"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config && { red "❌ TurboAcc冲突插件开启"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_kmod-dsa-qca8k=y" .config && { red "❌ DSA交换驱动未关闭"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_irqbalance=y" .config && { red "❌ irqbalance破坏NSS中断绑定"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_logrotate=y" .config || { red "❌ logrotate日志轮转工具缺失"; ERR_COUNT=$((ERR_COUNT+1)); }
 
-# NSS核心驱动校验
 grep -q "^CONFIG_PACKAGE_kmod-qca-nss-ecm=y" .config || { red "❌ NSS ECM核心转发驱动缺失"; ERR_COUNT=$((ERR_COUNT+1)); }
-grep -q "^CONFIG_PACKAGE_kmod-qca-ssdk=y" .config || { red "❌ SSDK交换驱动缺失，NSS无法正常工作"; ERR_COUNT=$((ERR_COUNT+1)); }
+grep -q "^CONFIG_PACKAGE_kmod-qca-ssdk=y" .config || { red "❌ SSDK交换驱动缺失"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config || { red "❌ 简体中文语言包未启用"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_ca-bundle=y" .config || { red "❌ CA证书包缺失，APK下载失败"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_kmod-tcp-bbr=y" .config || { red "❌ TCP BBR拥塞模块缺失"; ERR_COUNT=$((ERR_COUNT+1)); }
 
-# 无线驱动专项校验（根治速率跳水关键）
 grep -q "^CONFIG_PACKAGE_kmod-ath11k-ahb=y" .config || { red "❌ ath11k AHB无线驱动缺失"; ERR_COUNT=$((ERR_COUNT+1)); }
 grep -q "^CONFIG_PACKAGE_kmod-ath11k-pci=y" .config && { red "❌ 多余ath11k-pci驱动开启，冲突"; ERR_COUNT=$((ERR_COUNT+1)); }
 
-# 内核软件流表阻断校验
 for kcfg in "${FLOW_KERNEL_LIST[@]}"; do
     grep -q "^${kcfg}=y" .config && { red "❌ 内核流控参数 ${kcfg} 未关闭"; ERR_COUNT=$((ERR_COUNT+1)); }
 done
 
-# 校验结果判断
 if [[ ${ERR_COUNT} -eq 0 ]]; then
     green "🎉 全部配置校验通过！NSS12.5无线稳定方案无冲突，可开始编译"
 else

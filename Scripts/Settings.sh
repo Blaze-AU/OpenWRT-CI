@@ -221,6 +221,7 @@ uci set dhcp.@dnsmasq[0].min-cache-ttl="3600"
 uci set dhcp.@dnsmasq[0].edns-packet-max="1232"
 uci set dhcp.@dnsmasq[0].bogus_priv="1"
 uci set dhcp.@dnsmasq[0].stop_rebind="1"
+uci add_list dhcp.@dnsmasq[0].rebind_domain="ntp.org.cn"
 
 uci set network.wan.dns="223.5.5.5 119.29.29.29 180.76.76.76"
 uci set dhcp.@dnsmasq[0].logqueries="0"

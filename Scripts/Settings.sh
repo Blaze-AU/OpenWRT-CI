@@ -198,7 +198,7 @@ EOF
     chmod +x "${fpath}"
 }
 
-# 9.1 网络/DNS/IPv6固化
+# 9.1 网络/DNS/IPv6固化（已移除 logfacility 删除）
 write_uci "${UCI_DEFAULT_ROOT}/99-base-network" '
 uci -q get network.lan.ipaddr || uci set network.lan.ipaddr="'${WRT_IP}'"
 uci -q get system.@system[0].hostname || uci set system.@system[0].hostname="'${WRT_NAME}'"
@@ -212,7 +212,7 @@ uci set dhcp.lan.ndp_mode="relay"
 uci set dhcp.lan.ndp_relay="1"
 uci set dhcp.lan.force="1"
 uci set dhcp.lan.start="100"
-uci set dhcp.lan.limit="150"
+uci set dhcp.lan.limit="200"
 uci set dhcp.lan.leasetime="12h"
 
 uci set dhcp.@dnsmasq[0].maxconcurrent=500
@@ -225,7 +225,7 @@ uci add_list dhcp.@dnsmasq[0].rebind_domain="ntp.org.cn"
 
 uci set network.wan.dns="223.5.5.5 119.29.29.29 180.76.76.76"
 uci set dhcp.@dnsmasq[0].logqueries="0"
-uci del dhcp.@dnsmasq[0].logfacility 2>/dev/null
+# 已移除 uci del dhcp.@dnsmasq[0].logfacility
 uci del dhcp.odhcpd.leasetrigger 2>/dev/null
 
 echo "nameserver 223.5.5.5
@@ -237,7 +237,7 @@ uci commit dhcp
 /etc/init.d/dnsmasq reload
 '
 
-# 9.2 无线核心优化（修复：txqueuelen 在 wifi reload 后设置，移除无效 distance）
+# 9.2 无线核心优化（已移除 mu_mimo_80211ax 和 ofdma 强制关闭）
 write_uci "${UCI_DEFAULT_ROOT}/99-wifi-stable" '
 for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1); do
     uci set wireless.${dev}.disabled="0"
@@ -245,14 +245,15 @@ for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1
     uci set wireless.${dev}.log_level="3"
     uci set wireless.${dev}.ath11k_nss_offload="1"
     uci set wireless.${dev}.mu_beamformer="1"
-    uci set wireless.${dev}.mu_mimo_80211ax="0"
+    # 以下两行已移除：
+    # uci set wireless.${dev}.mu_mimo_80211ax="0"
+    # uci set wireless.${dev}.ofdma="0"
     uci set wireless.${dev}.he_su_beamformee="1"
     uci set wireless.${dev}.disable_11b="1"
     uci set wireless.${dev}.wmm="1"
     uci set wireless.${dev}.htmode="VHT80"
     uci set wireless.${dev}.dfs="0"
     uci set wireless.${dev}.txpower="20"
-    uci set wireless.${dev}.ofdma="0"
 done
 
 for iface in $(uci show wireless | grep "=wifi-iface" | cut -d. -f2 | cut -d= -f1); do
@@ -381,7 +382,6 @@ update_nss_pbuf_performance
 green "=== 配置 APK 软件源 ==="
 APK_REPO="./package/base-files/files/etc/apk/repositories.d/dist.conf"
 mkdir -p "$(dirname ${APK_REPO})"
-# 尝试从 .config 读取版本，若失败则使用默认 snapshot
 VERSION=$(grep -E '^VERSION' .config 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "25.10-SNAPSHOT")
 cat > "${APK_REPO}" <<EOF
 https://downloads.immortalwrt.org/releases/${VERSION}/targets/qualcommax/ipq60xx/packages

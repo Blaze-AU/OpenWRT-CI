@@ -247,43 +247,51 @@ uci commit dhcp
 /etc/init.d/dnsmasq reload
 '
 
-# 9.2 无线核心优化
-write_uci "${UCI_DEFAULT_ROOT}/99-wifi-stable" '
+write_uci "${UCI_DEFAULT_ROOT}/99-wifi-optimized" '
+#!/bin/sh
+# 无线核心综合优化：NSS卸载 + MU-MIMO + HE80 + 队列调优 + 公平调度
+
 for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1); do
-    uci set wireless.${dev}.disabled="0"
-    uci set wireless.${dev}.country="CN"
-    uci set wireless.${dev}.log_level="3"
-    uci set wireless.${dev}.ath11k_nss_offload="1"
-    uci set wireless.${dev}.mu_beamformer="1"
+    uci set wireless.$dev.disabled="0"
+    uci set wireless.$dev.country="CN"
+    uci set wireless.$dev.log_level="3"
+    uci set wireless.$dev.ath11k_nss_offload="1"
+    uci set wireless.$dev.mu_beamformer="1"
     uci set wireless.$dev.mu_mimo_80211ax="1"
-    uci set wireless.${dev}.he_su_beamformee="1"
-    uci set wireless.${dev}.disable_11b="1"
-    uci set wireless.${dev}.dfs="0"
-    uci set wireless.${dev}.txpower="20"
+    uci set wireless.$dev.he_su_beamformee="1"
+    uci set wireless.$dev.disable_11b="1"
+    uci set wireless.$dev.wmm="1"
+    # 不设置 txpower 和 dfs，由驱动自动管理，合规安全
 done
 
 for iface in $(uci show wireless | grep "=wifi-iface" | cut -d. -f2 | cut -d= -f1); do
-    uci set wireless.${iface}.ssid="'${WRT_SSID}'"
-    uci set wireless.${iface}.key="'${WRT_WORD}'"
-    uci set wireless.${iface}.encryption="psk2+ccmp"
-    uci set wireless.${iface}.apsd="0"
-    uci set wireless.${iface}.powermode="0"
+    uci set wireless.$iface.ssid="'${WRT_SSID}'"
+    uci set wireless.$iface.key="'${WRT_WORD}'"
+    uci set wireless.$iface.encryption="psk2+ccmp+sae"   # 混合模式，若不行改回 psk2+ccmp
+    uci set wireless.$iface.apsd="0"
+    uci set wireless.$iface.powermode="0"
 done
+
 uci commit wireless
 
-echo 0 > /sys/module/ath11k/parameters/debug_mask
-
-
+echo 0 > /sys/module/ath11k/parameters/debug_mask 2>/dev/null
 
 wifi reload
-sleep 2
+sleep 3
+
+# 调整所有无线接口的发送队列长度
 for wdev in $(iw dev 2>/dev/null | grep Interface | awk "{print \$2}"); do
     ip link set ${wdev} txqueuelen 8192 2>/dev/null
 done
 
-for sta_mac in $(iw dev phy0-ap0 station dump 2>/dev/null | grep Station | awk "{print \$2}"); do
-    iw dev phy0-ap0 station set ${sta_mac} airtime_weight 100 2>/dev/null
+# 对所有 AP 接口下的客户端设置 airtime_weight = 100
+for ap in $(iw dev 2>/dev/null | grep -A1 "type AP" | grep Interface | awk "{print \$2}"); do
+    for sta_mac in $(iw dev ${ap} station dump 2>/dev/null | grep Station | awk "{print \$2}"); do
+        iw dev ${ap} station set ${sta_mac} airtime_weight 100 2>/dev/null
+    done
 done
+
+exit 0
 '
 
 # 9.3 防火墙优化（增强版：清规则 → 按依赖卸载 → 记录结果）

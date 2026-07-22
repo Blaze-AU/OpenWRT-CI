@@ -247,7 +247,7 @@ uci commit dhcp
 /etc/init.d/dnsmasq reload
 '
 
-# 9.2 无线核心优化（强制 HE80，开启 MU-MIMO）
+# 9.2 无线核心优化
 write_uci "${UCI_DEFAULT_ROOT}/99-wifi-stable" '
 for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1); do
     uci set wireless.${dev}.disabled="0"
@@ -256,10 +256,8 @@ for dev in $(uci show wireless | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1
     uci set wireless.${dev}.ath11k_nss_offload="1"
     uci set wireless.${dev}.mu_beamformer="1"
     uci set wireless.$dev.mu_mimo_80211ax="1"
-    uci set wireless.${dev}.htmode="HE80"
     uci set wireless.${dev}.he_su_beamformee="1"
     uci set wireless.${dev}.disable_11b="1"
-    uci set wireless.${dev}.wmm="1"
     uci set wireless.${dev}.dfs="0"
     uci set wireless.${dev}.txpower="20"
 done

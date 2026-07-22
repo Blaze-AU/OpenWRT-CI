@@ -109,14 +109,7 @@ UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"
 # UPDATE_PACKAGE "theme-fluent" "LazuliKao/luci-theme-fluent" "main"
 
 # ---- 拉取应用（仅保留 timecontrol） ----
-# UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev"
-## 锁定固定版本 v1.19
-rm -rf package/luci-app-adguardhome
-git clone https://github.com/stevenjoezhang/luci-app-adguardhome package/luci-app-adguardhome
-cd package/luci-app-adguardhome
-git checkout v1.19
-cd ../../
-
+UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev"
 UPDATE_PACKAGE "luci-app-wechatpush" "tty228/luci-app-wechatpush" "master"
 # UPDATE_PACKAGE "homeproxy" "VIKINGYFY/homeproxy" "main"
 # UPDATE_PACKAGE "momo" "nikkinikki-org/OpenWrt-momo" "main"

@@ -1,24 +1,24 @@
-# ==================== 1. 基础目标与架构 ====================
+# ==================== 基础目标与 NSS 总控 ====================
 CONFIG_TARGET_ipq60xx=y
 CONFIG_TARGET_ipq60xx_generic=y
 CONFIG_IPV6=y
 CONFIG_KERNEL_RESERVED_PORTS=y
 
-# ==================== 2. NSS 硬件加速总开关 ====================
 CONFIG_NSS_OFFLOAD=y
 CONFIG_NSS_BRIDGE_OFFLOAD=y
 CONFIG_NSS_DP=y
 CONFIG_NSS_PPPOE_OFFLOAD=y
 
-# ==================== 3. NSS 内核基础依赖 ====================
+# ==================== 内核依赖 ====================
 CONFIG_KERNEL_NET_CLS_ACT=y
 CONFIG_KERNEL_NET_SCH_INGRESS=y
-CONFIG_KERNEL_NET_SCH_FQ_CODEL=n
 CONFIG_KERNEL_NET_CLS_FLOWER=y
 CONFIG_KERNEL_NET_ACT_GACT=y
+# 下面两个已在脚本中设为 n，此处保持一致
+CONFIG_KERNEL_NET_SCH_FQ_CODEL=n
 CONFIG_KERNEL_NET_SCH_TBF=n
 
-# ==================== 4. 完整 NSS 核心驱动套件 ====================
+# ==================== NSS 驱动（脚本已通过 set_pkg 覆盖） ====================
 CONFIG_PACKAGE_kmod-qca-nss-drv=y
 CONFIG_PACKAGE_kmod-qca-nss-dp=y
 CONFIG_PACKAGE_kmod-qca-nss-drv-qdisc=y
@@ -29,9 +29,7 @@ CONFIG_PACKAGE_kmod-qca-nss-crypto=y
 CONFIG_PACKAGE_kmod-qca-nss-cfi=y
 CONFIG_PACKAGE_kmod-nss-ifb=n
 
-
-
-# ==================== 5. NSS 隧道 & 管理模块 ====================
+# ==================== NSS 隧道 ====================
 CONFIG_PACKAGE_kmod-qca-nss-drv-gre=y
 CONFIG_PACKAGE_kmod-qca-nss-drv-l2tpv2=y
 CONFIG_PACKAGE_kmod-qca-nss-drv-vxlanmgr=y
@@ -42,21 +40,21 @@ CONFIG_PACKAGE_kmod-qca-nss-drv-netlink=y
 CONFIG_PACKAGE_kmod-qca-nss-drv-match=y
 CONFIG_PACKAGE_kmod-qca-nss-drv-lag-mgr=n
 
-# ==================== 6. NSS 固件（微码） ====================
+# ==================== 固件 ====================
 CONFIG_PACKAGE_nss-firmware=y
 CONFIG_PACKAGE_nss-firmware-ipq60xx=y
 CONFIG_PACKAGE_nss-eip-firmware=y
 
-# ==================== 7. IPQ6018 Wi-Fi 驱动 ====================
+# ==================== 无线 ====================
 CONFIG_PACKAGE_ath11k-firmware-ipq6018=y
 CONFIG_PACKAGE_kmod-ath11k-ahb=y
 CONFIG_PACKAGE_kmod-ath11k-pci=n
 
-# ==================== 8. 交换驱动（SSDK，禁用 DSA） ====================
+# ==================== 交换 ====================
 CONFIG_PACKAGE_kmod-qca-ssdk=y
 CONFIG_PACKAGE_kmod-dsa-qca8k=n
 
-# ==================== 9. 强制禁用软件加速（与 NSS ECM / MSD-LITE 互斥） ====================
+# ==================== 禁用软件加速 ====================
 CONFIG_PACKAGE_sqm-scripts=n
 CONFIG_PACKAGE_sqm-scripts-nss=n
 CONFIG_PACKAGE_luci-app-sqm=n
@@ -68,8 +66,9 @@ CONFIG_PACKAGE_kmod-nf-flow=n
 CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=n
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
 CONFIG_FEED_video=n
+CONFIG_PACKAGE_irqbalance=n   # 添加
 
-# ==================== 10. IPv6 支持 ====================
+# ==================== IPv6 ====================
 CONFIG_PACKAGE_odhcpd=y
 CONFIG_PACKAGE_odhcpd-ipv6only=n
 CONFIG_PACKAGE_odhcp6c=y
@@ -82,13 +81,10 @@ CONFIG_PACKAGE_kmod-ip6-tunnel=n
 CONFIG_PACKAGE_kmod-qca-nss-drv-tun6rd=n
 CONFIG_PACKAGE_kmod-qca-nss-drv-tunipip6=n
 
-
-
+# ==================== 基础工具 ====================
 CONFIG_PACKAGE_curl=y
 CONFIG_PACKAGE_wget=y
-CONFIG_PACKAGE_ca-certificates=y
-
-# 原有基础插件
+CONFIG_PACKAGE_ca-bundle=y
 CONFIG_PACKAGE_luci-app-autoreboot=y
 CONFIG_PACKAGE_htop=y
 CONFIG_PACKAGE_iperf3=y
@@ -105,55 +101,40 @@ CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_iputils-arping=y
 CONFIG_PACKAGE_luci-app-wol=y
 CONFIG_PACKAGE_etherwake=y
-
 CONFIG_PACKAGE_dnsmasq-full=y
 
-# ==================== 13. 内存与 ZRAM 优化 ====================
+# ==================== 内存 & ZRAM ====================
 CONFIG_CMA=y
 CONFIG_DMA_CMA=y
 CONFIG_CMA_SIZE_MBYTES=128
 
-# ==================== 14. 防火墙：纯 nftables ====================
+# ==================== 防火墙 ====================
 CONFIG_PACKAGE_kmod-ipt-core=y
 CONFIG_PACKAGE_kmod-nf-ipt=y
 CONFIG_PACKAGE_kmod-nf-nat=y
 CONFIG_PACKAGE_kmod-nft-fullcone=n
 
-# ==================== 15. 禁用无关默认设置 ====================
-# CONFIG_PACKAGE_default-settings-chn is not set
-
-# ==================== 16. 内核级强制阻断软件流控 ====================
+# ==================== 内核阻断 ====================
 CONFIG_NF_FLOW_TABLE=n
 CONFIG_NF_FLOW_TABLE_IPV4=n
 CONFIG_NF_FLOW_TABLE_IPV6=n
 CONFIG_NFT_FLOW_OFFLOAD=n
 CONFIG_PACKAGE_kmod-net-selftests=n
-
-# ==================== 17. 极致精简 ====================
-CONFIG_PACKAGE_kmod-bonding=n
-CONFIG_PACKAGE_kmod-macvlan=n
-
-# ==================== 18. 内核级硬阻断流控依赖 ====================
 CONFIG_NETFILTER_XT_MATCH_FLOW=n
 CONFIG_NETFILTER_XT_TARGET_FLOW=n
 CONFIG_NETFILTER_FLOW_TABLE=n
 CONFIG_NFT_TUNNEL=n
 CONFIG_NF_FLOW_TABLE_INET=n
 
-# ==================== 新增：ath11k 无线吞吐稳定内核开关 ====================
-# AMPDU聚合优化，提升大流量吞吐不丢MCS
+# ==================== 无线吞吐稳定开关 ====================
 CONFIG_MAC80211_AMPDU_TX=y
 CONFIG_MAC80211_AMPDU_RX=y
 CONFIG_MAC80211_TXQ_BYPASS=n
-# 关闭ath11k底层调试打印，减少中断抢占CPU（关键）
 CONFIG_ATH11K_DEBUG=n
-# 关闭debugfs（你的固件无调试节点，避免开机报错）
 CONFIG_DEBUG_FS=n
-# 放大无线缓冲区池
+CONFIG_MAC80211_DEBUGFS=n
 CONFIG_MAC80211_TX_BUFFER_POOL_SIZE=1024
 CONFIG_MAC80211_RX_BUFFER_POOL_SIZE=1024
-# 禁用无线驱动自动扫描干扰信道，防止频繁切速率
 CONFIG_MAC80211_SCAN_DELAY=1000
 CONFIG_MAC80211_NO_AUTO_CHANNEL_SELECT=y
-# 关闭802.11s Mesh，无用且占用无线算力
 CONFIG_MAC80211_MESH=n

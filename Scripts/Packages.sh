@@ -137,7 +137,6 @@ UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 # ---- 更新软件包版本（仅 sing-box） ----
 # UPDATE_VERSION "sing-box"
 
-make package/luci-app-adguardhome/clean
 
 # ---- 私有扩展 ----
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then

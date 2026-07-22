@@ -150,11 +150,11 @@ green "=== 8. defconfig 依赖补全 ==="
 make defconfig >/dev/null 2>&1 || { red "❌ defconfig 失败"; exit 1; }
 green "✅ 依赖补全完成"
 
-# ---------- 8.5 defconfig 后处理（使用 scripts/config 硬阻断） ----------
-green "=== 8.5 后处理硬阻断（使用 scripts/config 强制关闭流控） ==="
+# ---------- 8.5 defconfig 后处理（彻底移除软件流控） ----------
+green "=== 8.5 后处理硬阻断（彻底移除 nf-flow / nft-offload / net-selftests） ==="
 
-# 定义需要强制关闭的内核符号
-for sym in \
+# 1. 删除内核级配置
+for key in \
     CONFIG_NF_FLOW_TABLE \
     CONFIG_NF_FLOW_TABLE_IPV4 \
     CONFIG_NF_FLOW_TABLE_IPV6 \
@@ -165,18 +165,20 @@ for sym in \
     CONFIG_NETFILTER_FLOW_TABLE \
     CONFIG_NFT_TUNNEL
 do
-    ./scripts/config --disable "${sym#CONFIG_}"
+    sed -i "/^${key}=/d" .config
+    sed -i "/^# ${key} is not set/d" .config
+    echo "# ${key} is not set" >> .config
 done
 
-# 强制关闭软件加速包
+# 2. 删除包级别配置
 for pkg in kmod-nf-flow kmod-nft-offload kmod-net-selftests kmod-nft-fullcone; do
-    ./scripts/config --disable "PACKAGE_${pkg}"
+    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+    sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
+    echo "# CONFIG_PACKAGE_${pkg} is not set" >> .config
 done
 
-# 运行 oldconfig 使配置一致（自动处理依赖）
-make oldconfig >/dev/null 2>&1
+green "✅ 后处理硬阻断完成：所有软件流控模块已移除"
 
-green "✅ 后处理硬阻断完成：所有软件流控模块已强制关闭"
 # ---------- 9. uci-defaults 系统默认配置 ----------
 green "=== 9. uci-defaults 系统默认配置 ==="
 UCI_DIR="./package/base-files/files/etc/uci-defaults"
@@ -218,7 +220,7 @@ EOF
 sed -i "s/\${WRT_IP}/${WRT_IP}/g; s/\${WRT_NAME}/${WRT_NAME}/g" "$UCI_DIR/99-base"
 chmod +x "$UCI_DIR/99-base"
 
-# 9.2 Wi-Fi 最优配置
+# 9.2 Wi-Fi 最优配置（含 txqueuelen 8192 设置）
 cat > "$UCI_DIR/99-wifi" << 'EOF'
 #!/bin/sh
 for dev in $(uci show wireless | grep '=wifi-device' | cut -d. -f2 | cut -d= -f1); do
@@ -239,6 +241,13 @@ for iface in $(uci show wireless | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f
     uci set wireless.$iface.apsd='0'
 done
 uci commit wireless
+
+# 重启无线并设置 txqueuelen 8192
+wifi reload
+sleep 2
+for wdev in $(iw dev 2>/dev/null | grep Interface | awk '{print $2}'); do
+    ip link set $wdev txqueuelen 8192 2>/dev/null
+done
 exit 0
 EOF
 sed -i "s/\${WRT_SSID}/${WRT_SSID}/g; s/\${WRT_WORD}/${WRT_WORD}/g" "$UCI_DIR/99-wifi"
@@ -313,79 +322,68 @@ exit 0
 EOF
 chmod +x "$UCI_DIR/99-cpufreq"
 
-# ---------- 9.5 IRQ 绑定 & RPS/XPS 优化（写入 rc.local） ----------
-green "=== 9.5 写入 /etc/rc.local 的 IRQ 绑定脚本 ==="
-RC_LOCAL="./package/base-files/files/etc/rc.local"
-mkdir -p "$(dirname "$RC_LOCAL")"
-
-# 写入新的 rc.local（覆盖原有内容）
-cat > "$RC_LOCAL" << 'EOF'
+# 9.5 手动 IRQ 绑定（替换 irqbalance）+ RPS/XPS 优化
+cat > "$UCI_DIR/99-irq" << 'EOF'
 #!/bin/sh
-# /etc/rc.local - IRQ & RPS/XPS 优化
-
 # 禁用 irqbalance（若存在）
 /etc/init.d/irqbalance stop 2>/dev/null
 /etc/init.d/irqbalance disable 2>/dev/null
-killall irqbalance 2>/dev/null
 
-cpu_count=$(grep -c processor /proc/cpuinfo)
-[ -z "$cpu_count" ] && cpu_count=4
+cpu_count=$(grep -c processor /proc/cpuinfo 2>/dev/null || echo 4)
 
-# 生成全核掩码（十六进制）
-cpu_mask_all=0
-for ((i=0; i<cpu_count; i++)); do
-    cpu_mask_all=$((cpu_mask_all | (1 << i)))
-done
-mask_all_hex=$(printf "%x" $cpu_mask_all)
-
-# 1. 绑定 NSS 中断（轮询各核心）
+# 1. 动态绑定 NSS 中断到不同 CPU（轮询分配）
 nss_irqs=$(grep -E "nss_queue" /proc/interrupts | cut -d: -f1)
 idx=0
 for irq in $nss_irqs; do
-    core=$((idx % cpu_count))
-    mask=$((1 << core))
-    echo $mask > /proc/irq/$irq/smp_affinity 2>/dev/null && \
-        logger -t irq "NSS IRQ $irq -> CPU$core"
+    core=$(( idx % cpu_count ))
+    echo $((1 << core)) > /proc/irq/$irq/smp_affinity 2>/dev/null
+    logger -t irq "✅ NSS IRQ $irq 绑定到 CPU$core"
     idx=$((idx + 1))
 done
 
-# 2. 绑定无线中断到最后一个CPU
-last_cpu=$((cpu_count - 1))
-mask_last=$((1 << last_cpu))
+# 2. 绑定 ath11k 无线中断到最后一个 CPU（或负载最低的，此处固定到 CPU3）
 wifi_irqs=$(grep -E "ath11k|msi" /proc/interrupts | cut -d: -f1)
 for irq in $wifi_irqs; do
-    echo $mask_last > /proc/irq/$irq/smp_affinity 2>/dev/null && \
-        logger -t irq "ath11k IRQ $irq -> CPU$last_cpu"
+    echo 8 > /proc/irq/$irq/smp_affinity 2>/dev/null  # CPU3
+    logger -t irq "✅ ath11k IRQ $irq 绑定到 CPU3"
 done
 
-# 3. RPS 接收分流（只对物理网卡）
-for iface in /sys/class/net/*; do
-    [ -d "$iface/queues/rx-0" ] || continue
-    dev=$(basename "$iface")
-    case "$dev" in lo|br-*|vlan*|tun*|gre*|sit*|docker*) continue ;; esac
+# 3. RPS/XPS 多核分流（保留）
+for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
+    [ -d "$iface" ] || continue
+    iface_name=$(basename "$iface")
     for queue in "$iface"/queues/rx-*; do
-        echo $mask_all_hex > "$queue/rps_cpus" 2>/dev/null
+        [ -d "$queue" ] || continue
+        echo f > "$queue/rps_cpus" 2>/dev/null
+        echo 4096 > "$queue/rps_flow_cnt" 2>/dev/null
     done
-    ip link set "$dev" txqueuelen 5000 2>/dev/null
-    logger -t irq "RPS enabled on $dev"
+    ip link set "$iface_name" txqueuelen 5000 2>/dev/null
+    logger -t irq "✅ ${iface_name} RPS 接收分发 + 队列长度已优化"
 done
 
-# 4. XPS 发送分流
-for iface in /sys/class/net/*; do
-    [ -d "$iface/queues/tx-0" ] || continue
-    dev=$(basename "$iface")
-    case "$dev" in lo|br-*|vlan*|tun*|gre*|sit*|docker*) continue ;; esac
+for iface in br-lan br-wan; do
+    if [ -d "/sys/class/net/$iface" ]; then
+        for queue in /sys/class/net/$iface/queues/rx-*; do
+            [ -d "$queue" ] || continue
+            echo f > "$queue/rps_cpus" 2>/dev/null
+        done
+        logger -t irq "✅ ${iface} RPS 接收分发已开启"
+    fi
+done
+
+for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
+    [ -d "$iface" ] || continue
+    iface_name=$(basename "$iface")
     for queue in "$iface"/queues/tx-*; do
-        echo $mask_all_hex > "$queue/xps_cpus" 2>/dev/null
+        [ -d "$queue" ] || continue
+        echo f > "$queue/xps_cpus" 2>/dev/null
     done
-    logger -t irq "XPS enabled on $dev"
+    logger -t irq "✅ ${iface_name} XPS 发送分发已开启"
 done
 
 exit 0
 EOF
-
-chmod +x "$RC_LOCAL"
-green "✅ IRQ 绑定已写入 /etc/rc.local"
+chmod +x "$UCI_DIR/99-irq"
 
 # 9.6 ZRAM 动态自适应
 cat > "$UCI_DIR/99-zram" << 'EOF'

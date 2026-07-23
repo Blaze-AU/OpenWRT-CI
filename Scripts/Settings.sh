@@ -103,8 +103,8 @@ set_pkg kmod-qca-nss-drv kmod-qca-nss-dp kmod-qca-nss-drv-pppoe \
 set_pkg dnsmasq-full
 disable_pkg dnsmasq
 
-# 自动中断均衡服务
-set_pkg irqbalance
+# 自动中断均衡服务（已移除，使用手动绑定）
+# set_pkg irqbalance
 green "✅ NSS 12.5 核心驱动锁定完成"
 
 
@@ -112,14 +112,15 @@ green "✅ NSS 12.5 核心驱动锁定完成"
 green "=== 4. 禁用冲突软件加速包 ==="
 
 
-# 4.1 全链路禁用软件加速与冲突模块
+# 4.1 全链路禁用软件加速与冲突模块（增加 irqbalance）
 disable_pkg \
     sqm-scripts sqm-scripts-nss luci-app-sqm \
     luci-app-turboacc \
     kmod-fast-classifier kmod-shortcut-fe \
     kmod-nft-offload kmod-nf-flow \
     kmod-nft-fullcone kmod-br-netfilter \
-    kmod-nss-ifb
+    kmod-nss-ifb \
+    irqbalance
 
 force_disable_pkg \
 kmod-fast-classifier kmod-shortcut-fe \
@@ -301,20 +302,14 @@ update_nss_pbuf_performance() {
 }
 update_nss_pbuf_performance
 
+# 9.5 手动 IRQ 绑定（替换 irqbalance）+ RPS/XPS 优化
 cat > "$UCI_DIR/99-irq" << 'EOF'
 #!/bin/sh
 # 禁用 irqbalance（若存在）
 /etc/init.d/irqbalance stop 2>/dev/null
 /etc/init.d/irqbalance disable 2>/dev/null
 
-cpu_count=$(nproc 2>/dev/null || grep -c processor /proc/cpuinfo 2>/dev/null)
-cpu_count=${cpu_count:-4}  # 默认4核
-
-# 计算全核掩码（例如 4核 -> f，2核 -> 3）
-all_cpus_mask=$(printf "%x" $(( (1 << cpu_count) - 1 )))
-# 计算最后一个CPU的掩码
-last_cpu=$((cpu_count - 1))
-last_cpu_mask=$((1 << last_cpu))
+cpu_count=$(grep -c processor /proc/cpuinfo 2>/dev/null || echo 4)
 
 # 1. 动态绑定 NSS 中断到不同 CPU（轮询分配）
 nss_irqs=$(grep -E "nss_queue" /proc/interrupts | cut -d: -f1)
@@ -326,20 +321,20 @@ for irq in $nss_irqs; do
     idx=$((idx + 1))
 done
 
-# 2. 绑定 ath11k 无线中断到最后一个 CPU
+# 2. 绑定 ath11k 无线中断到最后一个 CPU（或负载最低的，此处固定到 CPU3）
 wifi_irqs=$(grep -E "ath11k|msi" /proc/interrupts | cut -d: -f1)
 for irq in $wifi_irqs; do
-    echo $last_cpu_mask > /proc/irq/$irq/smp_affinity 2>/dev/null
-    logger -t irq "✅ ath11k IRQ $irq 绑定到 CPU$last_cpu"
+    echo 8 > /proc/irq/$irq/smp_affinity 2>/dev/null  # CPU3
+    logger -t irq "✅ ath11k IRQ $irq 绑定到 CPU3"
 done
 
-# 3. RPS/XPS 多核分流（使用全核掩码）
+# 3. RPS/XPS 多核分流（保留）
 for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
     [ -d "$iface" ] || continue
     iface_name=$(basename "$iface")
     for queue in "$iface"/queues/rx-*; do
         [ -d "$queue" ] || continue
-        echo $all_cpus_mask > "$queue/rps_cpus" 2>/dev/null
+        echo f > "$queue/rps_cpus" 2>/dev/null
         echo 4096 > "$queue/rps_flow_cnt" 2>/dev/null
     done
     ip link set "$iface_name" txqueuelen 5000 2>/dev/null
@@ -350,7 +345,7 @@ for iface in br-lan br-wan; do
     if [ -d "/sys/class/net/$iface" ]; then
         for queue in /sys/class/net/$iface/queues/rx-*; do
             [ -d "$queue" ] || continue
-            echo $all_cpus_mask > "$queue/rps_cpus" 2>/dev/null
+            echo f > "$queue/rps_cpus" 2>/dev/null
         done
         logger -t irq "✅ ${iface} RPS 接收分发已开启"
     fi
@@ -361,7 +356,7 @@ for iface in /sys/class/net/wan /sys/class/net/lan* /sys/class/net/eth*; do
     iface_name=$(basename "$iface")
     for queue in "$iface"/queues/tx-*; do
         [ -d "$queue" ] || continue
-        echo $all_cpus_mask > "$queue/xps_cpus" 2>/dev/null
+        echo f > "$queue/xps_cpus" 2>/dev/null
     done
     logger -t irq "✅ ${iface_name} XPS 发送分发已开启"
 done
@@ -499,6 +494,12 @@ ERRORS=$((ERRORS + 1))
 fi
 if grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config 2>/dev/null; then
     red "❌ turboacc 仍启用，与 NSS 冲突"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# 确保 irqbalance 未启用
+if grep -q "^CONFIG_PACKAGE_irqbalance=y" .config 2>/dev/null; then
+    red "❌ irqbalance 仍启用，与手动 IRQ 绑定冲突"
     ERRORS=$((ERRORS + 1))
 fi
 

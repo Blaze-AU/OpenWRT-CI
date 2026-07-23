@@ -31,55 +31,78 @@ sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
 #修改默认主机名
 sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
 
-# ---- 3. NSS 核心驱动强制锁定（12.5 固件） ----
+# ---- 3. NSS 核心驱动强制锁定 ----
 green "=== 3. NSS 核心驱动锁定 ==="
-# 交换驱动：强制 SSDK，禁用 DSA（NSS 生效前提）
 set_pkg kmod-qca-ssdk
 disable_pkg kmod-dsa-qca8k
 
-# DNS 架构：强制 dnsmasq-full
 set_pkg dnsmasq-full
 disable_pkg dnsmasq
 
-# 4.2 USB 相关全禁用（Redmi AX5 无硬件 USB，精简内存）
+# ==================== 4. 冲突组件全局屏蔽 ====================
+green "=== 4. 软件流控/USB/冗余驱动全局禁用 ==="
 disable_pkg \
-kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
-kmod-usb-storage-uas kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-xhci-hcd \
-kmod-usb-common kmod-usb-roles \
-block-mount automount f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
-force_disable_pkg kmod-usb-core kmod-usb-storage
-# 4.1 全链路禁用软件加速与冲突模块（增加 irqbalance）
+    sqm-scripts sqm-scripts-nss luci-app-sqm luci-app-turboacc \
+    kmod-fast-classifier kmod-shortcut-fe kmod-nft-offload \
+    kmod-nf-flow kmod-nft-fullcone kmod-nss-ifb kmod-net-selftests \
+    kmod-bonding kmod-macvlan kmod-br-netfilter
+
 disable_pkg \
-    sqm-scripts sqm-scripts-nss luci-app-sqm \
-    luci-app-turboacc \
-    kmod-fast-classifier kmod-shortcut-fe \
-    kmod-nft-offload kmod-nf-flow \
-    kmod-nft-fullcone kmod-br-netfilter \
-    kmod-nss-ifb 
-   
+    kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras \
+    kmod-usb-dwc3 kmod-usb-dwc3-qcom block-mount automount \
+    f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 
-force_disable_pkg \
-kmod-fast-classifier kmod-shortcut-fe \
-kmod-nft-offload kmod-nf-flow
+# 删除 FEED_video，确认 6rd 是否存在
+disable_pkg 6rd kmod-nat46 kmod-sit kmod-ip6-tunnel \
+    kmod-qca-nss-drv-tun6rd kmod-qca-nss-drv-tunipip6
+
+disable_pkg luci-app-attendedsysupgrade \
+    kmod-qca-nss-drv-wifi-meshmgr kmod-qca-nss-drv-lag-mgr
+
+FLOW_KERNEL_LIST=(
+    CONFIG_NF_FLOW_TABLE CONFIG_NF_FLOW_TABLE_IPV4 CONFIG_NF_FLOW_TABLE_IPV6
+    CONFIG_NF_FLOW_TABLE_INET CONFIG_NFT_FLOW_OFFLOAD CONFIG_NETFILTER_XT_MATCH_FLOW
+    CONFIG_NETFILTER_XT_TARGET_FLOW CONFIG_NETFILTER_FLOW_TABLE CONFIG_NFT_TUNNEL
+)
+for item in "${FLOW_KERNEL_LIST[@]}"; do
+    set_config "${item}" n
+done
+
+set_config CONFIG_KERNEL_NET_SCH_FQ_CODEL n
+set_config CONFIG_KERNEL_NET_SCH_TBF n
+
+set_pkg kmod-ipt-core kmod-nf-ipt kmod-nf-nat
+green "✅ 所有与NSS冲突的软件转发组件已屏蔽"
 
 
-#配置文件修改
-echo "CONFIG_PACKAGE_luci=y" >> ./.config
-echo "CONFIG_LUCI_LANG_zh_Hans=y" >> ./.config
-echo "CONFIG_PACKAGE_luci-theme-$WRT_THEME=y" >> ./.config
-echo "CONFIG_PACKAGE_luci-app-$WRT_THEME-config=y" >> ./.config
-
-#引入私有扩展配置
-if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
-	echo "Applying private configurations from PRIVATE.txt..."
-	cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
+# ==================== 5. 私有配置文件追加 ====================
+if [[ -f "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" ]]; then
+    cat "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" >> .config
+    green "✅ 私有配置 PRIVATE.txt 合并完成"
 fi
 
-#手动调整的插件
-if [ -n "$WRT_PACKAGE" ]; then
-	echo -e "$WRT_PACKAGE" >> ./.config
+# ==================== 6. 自定义软件包追加 ====================
+if [[ -n "${WRT_PACKAGE}" ]]; then
+    green "📦 追加自定义软件包列表"
+    echo "${WRT_PACKAGE}" >> .config
 fi
 
+# ==================== 7. defconfig 自动依赖补齐 ====================
+green "=== 7. make defconfig 自动解析依赖 ==="
+make defconfig >/dev/null 2>&1 || { red "❌ make defconfig 执行失败，脚本终止"; exit 1; }
+green "✅ 内核/软件包依赖自动补齐"
+
+# ==================== 8. 二次硬阻断流控模块 ====================
+green "=== 8. 二次屏蔽软件流控，防止defconfig自动开启 ==="
+for item in "${FLOW_KERNEL_LIST[@]}"; do
+    set_config "${item}" n
+done
+FLOW_PKG_LIST=(kmod-nf-flow kmod-nft-offload kmod-net-selftests kmod-nft-fullcone)
+for pkg in "${FLOW_PKG_LIST[@]}"; do
+    disable_pkg "${pkg}"
+done
+make defconfig >/dev/null 2>&1 || { red "❌ 二次defconfig失败，终止"; exit 1; }
+green "✅ 流控模块双重屏蔽完成"
 
 # 9.1 基础网络与主机名
 cat > "$UCI_DIR/99-base" << 'EOF'

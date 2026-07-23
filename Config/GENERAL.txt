@@ -39,8 +39,8 @@ CONFIG_FEED_video=n
 
 # ==================== 您需要的插件 ====================
 CONFIG_PACKAGE_luci-app-autoreboot=y
-CONFIG_PACKAGE_luci-app-upnp=y
-CONFIG_PACKAGE_miniupnpd-nftables=y
+CONFIG_PACKAGE_luci-app-upnp=n
+CONFIG_PACKAGE_miniupnpd-nftables=n
 CONFIG_PACKAGE_htop=y
 CONFIG_PACKAGE_iperf3=y
 

@@ -192,13 +192,13 @@ update_nss_pbuf_performance
 
 cat > "$UCI_DIR/99-wifi" << 'EOF'
 #!/bin/sh
+# 仅当无线未启动时才配置，不暴力 reload
+if ! grep -q "phy0-ap0" /proc/net/dev 2>/dev/null; then
+    wifi up
+fi
 
-# 重启无线，确保接口已创建
-wifi reload
-sleep 3
-
-# 遍历所有无线接口，设置 txqueuelen 8192
-for wdev in $(ip -o link show | grep -E "phy[0-9]+-ap[0-9]+" | awk -F: '{print $2}' | tr -d ' '); do
+# 设置队列长度（确保接口存在）
+for wdev in $(ubus call network.interface.lan status | jsonfilter -e '@["device"]' | grep phy); do
     ip link set ${wdev} txqueuelen 8192 2>/dev/null
 done
 

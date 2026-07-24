@@ -68,14 +68,9 @@ sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
 #修改默认主机名
 sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
 
+ip link set phy0-ap0 txqueuelen 8192
+ip link set phy1-ap0 txqueuelen 8192
 
-ZRAM_CONF="./package/base-files/files/etc/config/zram"
-mkdir -p "$(dirname "$ZRAM_CONF")"
-cat > "$ZRAM_CONF" << 'EOF'
-config zram
-    option comp_algorithm 'lz4'
-    option size '256'
-EOF
 
 
 # ========== 5. NSS 核心驱动锁定 ==========
@@ -102,8 +97,9 @@ disable_pkg \
 disable_pkg 6rd kmod-nat46 kmod-sit kmod-ip6-tunnel \
     kmod-qca-nss-drv-tun6rd kmod-qca-nss-drv-tunipip6
 
-disable_pkg luci-app-attendedsysupgrade \
-    kmod-qca-nss-drv-wifi-meshmgr kmod-qca-nss-drv-lag-mgr
+disable_pkg luci-app-attendedsysupgrade kmod-qca-nss-drv-lag-mgr
+
+set_pkg kmod-qca-nss-drv-wifi-meshmgr
 
 FLOW_KERNEL_LIST=(
     CONFIG_NF_FLOW_TABLE CONFIG_NF_FLOW_TABLE_IPV4 CONFIG_NF_FLOW_TABLE_IPV6
@@ -153,7 +149,6 @@ cat > "$UCI_DIR/99-base" << 'EOF'
 #!/bin/sh
 uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr='${WRT_IP}'; uci commit network; }
 uci -q get system.@system[0].hostname || { uci set system.@system[0].hostname='${WRT_NAME}'; uci commit system; }
-uci -q get network.wan.mtu || { uci set network.wan.mtu='1492'; uci commit network; }
 uci set network.wan.ipv6='auto'
 uci set network.lan.ip6assign='64'
 uci set dhcp.lan.ra='hybrid'
@@ -202,54 +197,7 @@ update_nss_pbuf_performance() {
 }
 update_nss_pbuf_performance
 
-# ========== 12. WiFi 后处理（修复 txantenna 无效值） ==========
-# ========== 12. WiFi 后处理（修复 txantenna 无效值） ==========
-cat > "$UCI_DIR/99-wifi" << 'EOF'
-#!/bin/sh
-# 安全 WiFi 配置：避免重复启动、修正错误天线参数、设置队列长度
 
-if ! ip link show | grep -q "phy.*ap0"; then
-    logger -t wifi-setup "无线接口未找到，执行 wifi up"
-    wifi up
-    for i in $(seq 1 10); do
-        if ip link show | grep -q "phy.*ap0"; then
-            logger -t wifi-setup "无线接口已创建"
-            break
-        fi
-        sleep 0.5
-    done
-fi
-
-for dev in $(uci show wireless | grep '=wifi-device' | cut -d'=' -f1); do
-    tx_val=$(uci -q get "${dev}.txantenna")
-    if [ "$tx_val" = "4294967295" ]; then
-        uci set "${dev}.txantenna"='all'
-        uci set "${dev}.rxantenna"='all'
-        logger -t wifi-setup "修正 ${dev} 天线参数为 all"
-    fi
-done
-uci commit wireless
-
-if ! ubus -t 3 wait_for network.interface.lan 2>/dev/null; then
-    logger -t wifi-setup "⚠️ ubus 未就绪，跳过队列设置"
-else
-    devices=$(ubus call network.interface.lan status 2>/dev/null | jsonfilter -e '@["device"]' 2>/dev/null)
-    if [ -n "$devices" ]; then
-        for wdev in $devices; do
-            case "$wdev" in
-                phy*)
-                    if ip link show "$wdev" >/dev/null 2>&1; then
-                        ip link set "$wdev" txqueuelen 8192 2>/dev/null && \
-                            logger -t wifi-setup "设置 $wdev txqueuelen=8192"
-                    fi
-                    ;;
-            esac
-        done
-    fi
-fi
-exit 0
-EOF
-chmod +x "$UCI_DIR/99-wifi"
 
 # ========== 13. sysctl 网络调优 ==========
 green "=== sysctl 网络调优 ==="

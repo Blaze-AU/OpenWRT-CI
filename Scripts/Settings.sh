@@ -2,6 +2,48 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
+# ========== 必须的基础函数 ==========
+green() { echo -e "\033[32m$1\033[0m"; }
+red() { echo -e "\033[31m$1\033[0m"; }
+
+set_pkg() {
+    for pkg in "$@"; do
+        sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+        sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
+        echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+    done
+}
+
+disable_pkg() {
+    for pkg in "$@"; do
+        sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+        sed -i "/^# CONFIG_PACKAGE_${pkg} is not set/d" .config
+        echo "# CONFIG_PACKAGE_${pkg} is not set" >> .config
+    done
+}
+
+# ========== 修复：set_config 完整定义 ==========
+set_config() {
+    local key="$1" value="$2"
+    if [ "$value" = "n" ]; then
+        sed -i "/^${key}=/d" .config
+        sed -i "/^# ${key} is not set/d" .config
+        echo "# ${key} is not set" >> .config
+    else
+        if grep -q "^${key}=" .config; then
+            sed -i "s@^${key}=.*@${key}=${value}@g" .config
+        elif grep -q "^# ${key} is not set" .config; then
+            sed -i "s@^# ${key} is not set@${key}=${value}@g" .config
+        else
+            echo "${key}=${value}" >> .config
+        fi
+    fi
+}
+
+# ========== 修复：定义 UCI_DIR ==========
+UCI_DIR="./package/base-files/files/etc/uci-defaults"
+mkdir -p "$UCI_DIR"
+
 #移除luci-app-attendedsysupgrade
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile")
 #修改默认主题

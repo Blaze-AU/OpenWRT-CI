@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-# ========== 必须的基础函数 ==========
+# ========== 2. 基础函数 ==========
 green() { echo -e "\033[32m$1\033[0m"; }
 red() { echo -e "\033[31m$1\033[0m"; }
 
@@ -22,67 +22,62 @@ disable_pkg() {
     done
 }
 
-# ========== 修复：set_config 完整定义 ==========
+# -------- 修复：set_config 先删除再追加，避免重复 --------
 set_config() {
     local key="$1" value="$2"
+    sed -i "/^${key}=/d" .config
+    sed -i "/^# ${key} is not set/d" .config
     if [ "$value" = "n" ]; then
-        sed -i "/^${key}=/d" .config
-        sed -i "/^# ${key} is not set/d" .config
         echo "# ${key} is not set" >> .config
     else
-        if grep -q "^${key}=" .config; then
-            sed -i "s@^${key}=.*@${key}=${value}@g" .config
-        elif grep -q "^# ${key} is not set" .config; then
-            sed -i "s@^# ${key} is not set@${key}=${value}@g" .config
-        else
-            echo "${key}=${value}" >> .config
-        fi
+        echo "${key}=${value}" >> .config
     fi
 }
 
-# ========== 修复：定义 UCI_DIR ==========
+# ========== 3. 目录准备 ==========
 UCI_DIR="./package/base-files/files/etc/uci-defaults"
 mkdir -p "$UCI_DIR"
 
-#移除luci-app-attendedsysupgrade
-sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile")
-#修改默认主题
-sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
-#修改immortalwrt.lan关联IP
-sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js")
-#去除编译日期标识
-sed -i 's/(\(luciversion || ''\))[^)]*)/(\1)/g' $(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js") 2>/dev/null || true
+# ========== 4. 界面与系统调整 ==========
+# 移除 attendedsysupgrade（使用 find -exec 避免参数过长）
+find ./feeds/luci/collections/ -type f -name "Makefile" -exec sed -i "/attendedsysupgrade/d" {} + 2>/dev/null
 
-WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
+# 修改默认主题
+find ./feeds/luci/collections/ -type f -name "Makefile" -exec sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" {} + 2>/dev/null
+
+# 修改 luci 系统模块中的 IP
+find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js" -exec sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" {} + 2>/dev/null
+
+# 去除编译日期标识
+find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js" -exec sed -i 's/(\(luciversion || ''\))[^)]*)/(\1)/g' {} + 2>/dev/null || true
+
+# -------- 修复：检查无线配置文件是否存在 ----------
+WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null | head -1)
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
 if [ -f "$WIFI_SH" ]; then
-	#修改WIFI名称
-	sed -i "s/BASE_SSID='.*'/BASE_SSID='$WRT_SSID'/g" $WIFI_SH
-	#修改WIFI密码
-	sed -i "s/BASE_WORD='.*'/BASE_WORD='$WRT_WORD'/g" $WIFI_SH
+    sed -i "s/BASE_SSID='.*'/BASE_SSID='$WRT_SSID'/g" "$WIFI_SH"
+    sed -i "s/BASE_WORD='.*'/BASE_WORD='$WRT_WORD'/g" "$WIFI_SH"
 elif [ -f "$WIFI_UC" ]; then
-	#修改WIFI名称
-	sed -i "s/ssid='.*'/ssid='$WRT_SSID'/g" $WIFI_UC
-	#修改WIFI密码
-	sed -i "s/key='.*'/key='$WRT_WORD'/g" $WIFI_UC
+    sed -i "s/ssid='.*'/ssid='$WRT_SSID'/g" "$WIFI_UC"
+    sed -i "s/key='.*'/key='$WRT_WORD'/g" "$WIFI_UC"
 fi
 
 CFG_FILE="./package/base-files/files/bin/config_generate"
-#修改默认IP地址
-sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
-#修改默认主机名
-sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
+[ -f "$CFG_FILE" ] && {
+    sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" "$CFG_FILE"
+    sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" "$CFG_FILE"
+}
 
-# ---- 3. NSS 核心驱动强制锁定 ----
-green "=== 3. NSS 核心驱动锁定 ==="
+# ========== 5. NSS 核心驱动锁定 ==========
+green "=== NSS 核心驱动锁定 ==="
 set_pkg kmod-qca-ssdk
 disable_pkg kmod-dsa-qca8k
 
 set_pkg dnsmasq-full
 disable_pkg dnsmasq
 
-# ==================== 4. 冲突组件全局屏蔽 ====================
-green "=== 4. 软件流控/USB/冗余驱动全局禁用 ==="
+# ========== 6. 冲突组件全局屏蔽 ==========
+green "=== 软件流控/USB/冗余驱动全局禁用 ==="
 disable_pkg \
     sqm-scripts sqm-scripts-nss luci-app-sqm luci-app-turboacc \
     kmod-fast-classifier kmod-shortcut-fe kmod-nft-offload \
@@ -94,7 +89,6 @@ disable_pkg \
     kmod-usb-dwc3 kmod-usb-dwc3-qcom block-mount automount \
     f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
 
-# 删除 FEED_video，确认 6rd 是否存在
 disable_pkg 6rd kmod-nat46 kmod-sit kmod-ip6-tunnel \
     kmod-qca-nss-drv-tun6rd kmod-qca-nss-drv-tunipip6
 
@@ -116,26 +110,24 @@ set_config CONFIG_KERNEL_NET_SCH_TBF n
 set_pkg kmod-ipt-core kmod-nf-ipt kmod-nf-nat
 green "✅ 所有与NSS冲突的软件转发组件已屏蔽"
 
-
-# ==================== 5. 私有配置文件追加 ====================
-if [[ -f "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" ]]; then
+# ========== 7. 私有配置与自定义包 ==========
+[ -f "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" ] && {
     cat "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" >> .config
     green "✅ 私有配置 PRIVATE.txt 合并完成"
-fi
+}
 
-# ==================== 6. 自定义软件包追加 ====================
-if [[ -n "${WRT_PACKAGE}" ]]; then
+[ -n "${WRT_PACKAGE}" ] && {
     green "📦 追加自定义软件包列表"
     echo "${WRT_PACKAGE}" >> .config
-fi
+}
 
-# ==================== 7. defconfig 自动依赖补齐 ====================
-green "=== 7. make defconfig 自动解析依赖 ==="
-make defconfig >/dev/null 2>&1 || { red "❌ make defconfig 执行失败，脚本终止"; exit 1; }
+# ========== 8. defconfig 自动依赖补齐 ==========
+green "=== make defconfig 自动解析依赖 ==="
+make defconfig >/dev/null 2>&1 || { red "❌ make defconfig 执行失败"; exit 1; }
 green "✅ 内核/软件包依赖自动补齐"
 
-# ==================== 8. 二次硬阻断流控模块 ====================
-green "=== 8. 二次屏蔽软件流控，防止defconfig自动开启 ==="
+# ========== 9. 二次硬阻断流控模块 ==========
+green "=== 二次屏蔽软件流控 ==="
 for item in "${FLOW_KERNEL_LIST[@]}"; do
     set_config "${item}" n
 done
@@ -143,10 +135,10 @@ FLOW_PKG_LIST=(kmod-nf-flow kmod-nft-offload kmod-net-selftests kmod-nft-fullcon
 for pkg in "${FLOW_PKG_LIST[@]}"; do
     disable_pkg "${pkg}"
 done
-make defconfig >/dev/null 2>&1 || { red "❌ 二次defconfig失败，终止"; exit 1; }
+make defconfig >/dev/null 2>&1 || { red "❌ 二次defconfig失败"; exit 1; }
 green "✅ 流控模块双重屏蔽完成"
 
-# 9.1 基础网络与主机名
+# ========== 10. uci-defaults 基础网络配置 ==========
 cat > "$UCI_DIR/99-base" << 'EOF'
 #!/bin/sh
 uci -q get network.lan.ipaddr || { uci set network.lan.ipaddr='${WRT_IP}'; uci commit network; }
@@ -161,40 +153,58 @@ uci commit network
 uci commit dhcp
 uci add_list dhcp.@dnsmasq[0].rebind_domain="ntp.org.cn"
 uci del dhcp.@dnsmasq[0].logfacility 2>/dev/null
-
 uci del_list system.@system[0].ntp_server='ntp.org.cn' 2>/dev/null
 uci add_list system.@system[0].ntp_server='ntp.org.cn'
-
 exit 0
 EOF
 sed -i "s/\${WRT_IP}/${WRT_IP}/g; s/\${WRT_NAME}/${WRT_NAME}/g" "$UCI_DIR/99-base"
 chmod +x "$UCI_DIR/99-base"
 
-
-# ==================== NSS PBUF 动态策略 ====================
+# ========== 11. NSS PBUF 动态策略（目标平台内存硬编码） ==========
 update_nss_pbuf_performance() {
     local conf="./package/kernel/mac80211/files/pbuf.uci"
-    if [ -f "$conf" ]; then
-        mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        mem_mb=$((mem_total / 1024))
-        if [ ${mem_mb} -le 256 ]; then
-            sed -i "s/auto_scale '1'/auto_scale 'off'/g" "$conf" 2>/dev/null
-            green "✅ NSS PBUF: 内存 ${mem_mb}MB <= 256，auto_scale 关闭以节省内存"
-        else
-            sed -i "s/auto_scale 'off'/auto_scale '1'/g" "$conf" 2>/dev/null
-            green "✅ NSS PBUF: 内存 ${mem_mb}MB > 256，auto_scale 开启"
-        fi
-        sed -i "s/scaling_governor 'performance'/scaling_governor 'schedutil'/g" "$conf" 2>/dev/null
-        green "✅ NSS PBUF: CPU 调度器确保为 schedutil"
+    [ -f "$conf" ] || return 0
+
+    # -------- 修复：根据目标平台决定（此处以 Redmi AX5 为例，实际可扩展） ----------
+    # 若设备为 Redmi AX5（1GB RAM）则强制开启 auto_scale
+    local target_mem_mb=1024
+    case "${WRT_TARGET,,}" in
+        *ax5*|*ipq60xx*) target_mem_mb=1024 ;;
+        *) # 其他平台可保留自动检测（但会检测构建主机，非目标设备）
+           if grep -q "MemTotal" /proc/meminfo 2>/dev/null; then
+               local mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+               target_mem_mb=$((mem_total / 1024))
+           else
+               target_mem_mb=512 # 备用
+           fi
+           ;;
+    esac
+
+    if [ ${target_mem_mb} -le 256 ]; then
+        sed -i "s/auto_scale '1'/auto_scale 'off'/g" "$conf" 2>/dev/null
+        green "✅ NSS PBUF: 内存 ${target_mem_mb}MB <= 256，auto_scale 关闭以节省内存"
+    else
+        sed -i "s/auto_scale 'off'/auto_scale '1'/g" "$conf" 2>/dev/null
+        green "✅ NSS PBUF: 内存 ${target_mem_mb}MB > 256，auto_scale 开启"
     fi
+    sed -i "s/scaling_governor 'performance'/scaling_governor 'schedutil'/g" "$conf" 2>/dev/null
+    green "✅ NSS PBUF: CPU 调度器确保为 schedutil"
 }
 update_nss_pbuf_performance
 
+# ========== 12. WiFi 后处理（修复 txantenna 无效值） ==========
 cat > "$UCI_DIR/99-wifi" << 'EOF'
 #!/bin/sh
 # 仅当无线未启动时才配置，不暴力 reload
 if ! grep -q "phy0-ap0" /proc/net/dev 2>/dev/null; then
     wifi up
+fi
+
+# 修正因设置 txantenna=4294967295 导致的 warning（若存在）
+if uci -q get wireless.@wifi-device[0].txantenna | grep -q "4294967295"; then
+    uci set wireless.@wifi-device[0].txantenna='all'
+    uci set wireless.@wifi-device[0].rxantenna='all'
+    uci commit wireless
 fi
 
 # 设置队列长度（确保接口存在）
@@ -206,8 +216,8 @@ exit 0
 EOF
 chmod +x "$UCI_DIR/99-wifi"
 
-
-green "=== 10. sysctl 网络调优 ==="
+# ========== 13. sysctl 网络调优 ==========
+green "=== sysctl 网络调优 ==="
 SYSCTL_CONF="./package/base-files/files/etc/sysctl.conf"
 mkdir -p "$(dirname "$SYSCTL_CONF")"
 if ! grep -q "nf_conntrack_max" "$SYSCTL_CONF" 2>/dev/null; then
@@ -232,10 +242,10 @@ EOF
 green "✅ sysctl 参数已写入"
 fi
 
-# ==================== 10. 开机模块黑名单 ====================
-green "=== 10. 驱动黑名单，永久屏蔽软件转发模块 ==="
+# ========== 14. 开机模块黑名单 ==========
+green "=== 驱动黑名单 ==="
 BLACKLIST_CONF="./package/base-files/files/etc/modprobe.d/nss-blacklist.conf"
-mkdir -p "$(dirname ${BLACKLIST_CONF})"
+mkdir -p "$(dirname "${BLACKLIST_CONF}")"
 cat > "${BLACKLIST_CONF}" <<'EOF'
 # NSS 冲突模块黑名单 - 禁止软件流控模块加载
 blacklist nf_flow_table
@@ -247,8 +257,8 @@ EOF
 chmod 644 "${BLACKLIST_CONF}"
 green "✅ 黑名单已写入"
 
-# ==================== 11. 开机 init.d 冲突模块卸载脚本 ====================
-green "=== 11. 写入开机防冲突守护脚本 kick-nss-clean ==="
+# ========== 15. 开机 init.d 冲突模块卸载脚本 ==========
+green "=== 写入开机防冲突守护脚本 kick-nss-clean ==="
 INIT_KICK="./package/base-files/files/etc/init.d/kick-nss-clean"
 cat > "${INIT_KICK}" <<'EOF'
 #!/bin/sh /etc/rc.common
@@ -264,40 +274,40 @@ boot() {
         logger -t nss-kick "已清除 flow offload 规则"
     fi
 
-    # 2. 按依赖顺序卸载
-    rmmod nft_flow_offload 2>/dev/null
-    rmmod nf_flow_table_inet 2>/dev/null
-    rmmod nf_flow_table 2>/dev/null
-    rmmod shortcut_fe 2>/dev/null
-    rmmod fast_classifier 2>/dev/null
+    # 2. 递归卸载（使用 modprobe -r 处理依赖关系）
+    for mod in nft_flow_offload nf_flow_table_inet nf_flow_table shortcut_fe fast_classifier; do
+        modprobe -r "$mod" 2>/dev/null || rmmod "$mod" 2>/dev/null
+    done
 
-    # 3. 验证并强制重试
+    # 3. 验证并强制重试（若仍残留）
     if lsmod | grep -E "nf_flow|nft_flow|shortcut|fast_classifier"; then
         logger -t nss-kick "⚠️ 残留冲突模块，尝试强制卸载..."
-        rmmod -f nft_flow_offload nf_flow_table_inet nf_flow_table 2>/dev/null
+        for mod in nft_flow_offload nf_flow_table_inet nf_flow_table; do
+            rmmod -f "$mod" 2>/dev/null
+        done
     else
         logger -t nss-kick "✅ 冲突模块已清理，NSS 独占硬件加速"
     fi
 
-    # 4. 重启 ECM 确保接管（若有 init 脚本）
+    # 4. 重启 ECM 确保接管
     /etc/init.d/ecm restart 2>/dev/null || killall -9 ecm 2>/dev/null
 }
 EOF
 chmod +x "${INIT_KICK}"
 green "✅ 开机清理脚本写入完成"
 
-
-#无WIFI配置标志
+# ========== 16. 无 WIFI 配置标志 ==========
 if [[ "${WRT_CONFIG,,}" == *"wifi"* && "${WRT_CONFIG,,}" == *"no"* ]]; then
-	echo "WRT_WIFI=wifi-no" >> $GITHUB_ENV
+    echo "WRT_WIFI=wifi-no" >> $GITHUB_ENV
 fi
 
-#高通平台调整
+# ========== 17. 高通平台 DTS 替换（nowifi） ==========
 DTS_PATH="./target/linux/qualcommax/dts/"
 if [[ "${WRT_TARGET^^}" == *"QUALCOMMAX"* ]]; then
-	#无WIFI配置调整Q6大小
-	if [[ "${WRT_CONFIG,,}" == *"wifi"* && "${WRT_CONFIG,,}" == *"no"* ]]; then
-		find $DTS_PATH -type f ! -iname '*nowifi*' -exec sed -i 's/ipq\(6018\|8074\).dtsi/ipq\1-nowifi.dtsi/g' {} +
-		echo "qualcommax set up nowifi successfully!"
-	fi
+    if [[ "${WRT_CONFIG,,}" == *"wifi"* && "${WRT_CONFIG,,}" == *"no"* ]]; then
+        find "$DTS_PATH" -type f ! -iname '*nowifi*' -exec sed -i 's/ipq\(6018\|8074\)\.dtsi/ipq\1-nowifi.dtsi/g' {} + 2>/dev/null
+        echo "qualcommax set up nowifi successfully!"
+    fi
 fi
+
+green "✅ 所有定制步骤完成！"

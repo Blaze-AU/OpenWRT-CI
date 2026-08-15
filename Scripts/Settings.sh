@@ -248,8 +248,7 @@ fi
 # ===================== 7. NSS init =====================
 green "=== 7. nss-fix 服务 ==="
 NSS_INIT="$BASE_FILES/etc/init.d/nss-fix"
-mkdir -p "$(dirname "$NSS_INIT")"
-cat > "$NSS_INIT" <<'EOF'
+cat > "$NSS_INIT" <<'INNEREOF'
 #!/bin/sh /etc/rc.common
 START=12
 STOP=10
@@ -266,9 +265,10 @@ start() {
         uci set firewall.@defaults[0].nss_offload='1'
         uci commit firewall
 
-        echo 1 > /sys/module/qca_nss_drv/parameters/ppe_enable 2>/dev/null || true
-        echo 1 > /sys/module/qca_nss_drv/parameters/bridge_offload 2>/dev/null || true
-        echo 1 > /sys/module/qca_nss_ecm/parameters/fullcone 2>/dev/null || true
+        # 参数写入前先检查文件是否存在（消除错误日志）
+        [ -f /sys/module/qca_nss_drv/parameters/ppe_enable ] && echo 1 > /sys/module/qca_nss_drv/parameters/ppe_enable 2>/dev/null
+        [ -f /sys/module/qca_nss_drv/parameters/bridge_offload ] && echo 1 > /sys/module/qca_nss_drv/parameters/bridge_offload 2>/dev/null
+        [ -f /sys/module/qca_nss_ecm/parameters/fullcone ] && echo 1 > /sys/module/qca_nss_ecm/parameters/fullcone 2>/dev/null
 
         if [ -x /etc/init.d/qca-nss-ecm ]; then
             /etc/init.d/qca-nss-ecm restart 2>/dev/null && logger -t nss-fix "ecm 重启成功" || logger -t nss-fix "ecm 重启失败"
@@ -287,7 +287,7 @@ start() {
         logger -t nss-fix "NSS 初始化完成"
     ) &
 }
-EOF
+INNEREOF
 chmod 0755 "$NSS_INIT"
 green "✅ nss-fix 部署完成"
 
@@ -313,13 +313,29 @@ mkdir -p "$(dirname "$SYSCTL_CONF")"
 touch "$SYSCTL_CONF"
 sed -i '/^net\.netfilter\.nf_conntrack_max/d; /^net\.core\.rmem_max/d; /^net\.core\.wmem_max/d; /^net\.bridge\.bridge-nf-call-/d; /^net\.ipv4\.tcp_congestion_control/d' "$SYSCTL_CONF"
 cat >> "$SYSCTL_CONF" <<'EOF'
+# ==================== 连接跟踪（Conntrack）调优 ====================
 net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 30
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
 net.netfilter.nf_conntrack_max = 131072
+
+# ==================== 通用 Socket 缓冲区 ====================
 net.core.rmem_default = 87380
 net.core.wmem_default = 87380
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+
+# ==================== TCP 缓冲区（三段式：最小值 默认值 最大值） ====================
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 16384 16777216
+
+# ==================== TCP 窗口缩放（RFC 1323） ====================
+# 必须开启，否则最大窗口只有 64KB，大缓冲区无效
+net.ipv4.tcp_window_scaling = 1
+
+# ==================== MTU 探测 ====================
+net.ipv4.tcp_mtu_probing = 1
+
+# ==================== 桥接防火墙调用禁用（确保 NSS 加速不被绕过） ====================
 net.bridge.bridge-nf-call-iptables = 0
 net.bridge.bridge-nf-call-ip6tables = 0
 net.bridge.bridge-nf-call-arptables = 0
@@ -359,9 +375,26 @@ done
 
 make olddefconfig > /dev/null 2>&1 || true
 
-for pkg in kmod-nft-offload kmod-nf-flow kmod-shortcut-fe; do
-    force_disable_pkg "$pkg"
+# 检查并报告关键选项状态
+# ===================== 12.1 内核流控选项最终状态与自动修复 =====================
+green "=== 12.1 内核流控选项最终状态 ==="
+
+# 最多尝试 3 次自动修复
+for attempt in 1 2 3; do
+    if grep -qE "CONFIG_NF_FLOW_TABLE=y|CONFIG_SHORTCUT_FE=y|CONFIG_NFT_FLOW_OFFLOAD=y" .config 2>/dev/null; then
+        yellow "⚠️ 第 $attempt 次检测到软件加速选项被启用，正在重新禁用..."
+        for opt in "${KERNEL_FLOW_OPTS[@]}"; do
+            force_disable_kernel_opt "$opt"
+        done
+        make olddefconfig > /dev/null 2>&1 || true
+    else
+        green "✅ 软件加速选项已全部禁用（第 $attempt 次检查通过）"
+        break
+    fi
 done
+
+# 最终状态输出
+grep -E "CONFIG_NF_FLOW_TABLE|CONFIG_SHORTCUT_FE|CONFIG_NFT_FLOW_OFFLOAD" .config || true
 green "✅ 软件流控已彻底禁用"
 
 # ===================== 13. 校验 =====================

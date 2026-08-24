@@ -29,7 +29,8 @@ UPDATE_PACKAGE() {
 			echo "Not fonud directory: $NAME"
 		fi
 	done
-
+	
+    
 	# 克隆 GitHub 仓库
 	git clone --depth=1 --single-branch --branch $PKG_BRANCH "https://github.com/$PKG_REPO.git"
 
@@ -63,7 +64,7 @@ UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev
 UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg"
 UPDATE_PACKAGE "passwall2" "Openwrt-Passwall/openwrt-passwall2" "main" "pkg"
 
-UPDATE_PACKAGE "luci-app-smartdns" "pymumu/smartdns" "master"
+UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "" "smartdns"
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
 
 #UPDATE_PACKAGE "athena-led" "unraveloop/JDC-AX6600-Athena-LED-Controller" "main"

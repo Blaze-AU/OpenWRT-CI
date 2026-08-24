@@ -63,7 +63,11 @@ UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"
 UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg"
 UPDATE_PACKAGE "passwall2" "Openwrt-Passwall/openwrt-passwall2" "main" "pkg"
+# 从核心仓库提取 OpenWrt 打包目录（使用 Release48.4 标签）
+UPDATE_PACKAGE "smartdns" "pymumu/smartdns" "master" "apk" "smartdns"
 
+# 修复 Rust 依赖（注释掉不必要的 include 行）
+sed -i 's/^include ..\/..\/lang\/rust\/rust-package.mk/#include ..\/..\/lang\/rust\/rust-package.mk/' package/smartdns/Makefile
 UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "" "smartdns"
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
 

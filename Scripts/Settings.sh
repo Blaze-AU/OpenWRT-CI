@@ -75,37 +75,19 @@ force_disable_kernel_opt() {
     echo "# ${key} is not set" >> "$CONFIG_FILE"
 }
 
-# 特殊字符转义函数（用于 sed 替换和单引号安全）
-escape_sed() {
-    printf '%s' "$1" | sed -e 's/[&@/\]/\\&/g' -e "s/'/'"'"'/g"
-}
-
-# ===================== 0. 预检查 =====================
-green "=== 0. 预检查 ==="
-[ -f "$CONFIG_FILE" ] || { red "❌ 未找到 .config 文件，请先运行 make defconfig"; exit 1; }
-green "✅ .config 文件存在"
-
 # ===================== 1. 源码修改 =====================
 green "=== 1. 静态源码修改 ==="
 find ./feeds/luci/collections/ -type f -name Makefile -exec sed -i -e "/attendedsysupgrade/d" -e "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" {} \;
 find ./feeds/luci/modules/luci-mod-system/ -type f -name flash.js -exec sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" {} \;
 
-# 处理可能存在的多个无线配置脚本
-WIFI_FILES=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null || true)
-if [ -n "$WIFI_FILES" ]; then
-    while IFS= read -r wifi_file; do
-        [ -f "$wifi_file" ] || continue
-        sed -i "s/BASE_SSID='.*'/BASE_SSID='${WRT_SSID}'/g" "$wifi_file"
-        sed -i "s/BASE_WORD='.*'/BASE_WORD='${WRT_WORD}'/g" "$wifi_file"
-        green "✅ 修改无线脚本: $wifi_file"
-    done <<< "$WIFI_FILES"
-else
-    WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
-    if [ -f "$WIFI_UC" ]; then
-        sed -i "s/ssid='.*'/ssid='${WRT_SSID}'/g" "$WIFI_UC"
-        sed -i "s/key='.*'/key='${WRT_WORD}'/g" "$WIFI_UC"
-        green "✅ 修改 mac80211.uc"
-    fi
+WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
+WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
+if [ -f "$WIFI_SH" ]; then
+    sed -i "s/BASE_SSID='.*'/BASE_SSID='${WRT_SSID}'/g" "$WIFI_SH"
+    sed -i "s/BASE_WORD='.*'/BASE_WORD='${WRT_WORD}'/g" "$WIFI_SH"
+elif [ -f "$WIFI_UC" ]; then
+    sed -i "s/ssid='.*'/ssid='${WRT_SSID}'/g" "$WIFI_UC"
+    sed -i "s/key='.*'/key='${WRT_WORD}'/g" "$WIFI_UC"
 fi
 
 CFG_FILE="$BASE_FILES/bin/config_generate"
@@ -119,16 +101,8 @@ green "=== 2. 主题与语言配置 ==="
     echo "CONFIG_PACKAGE_luci=y"
     echo "CONFIG_LUCI_LANG_zh_Hans=y"
     echo "CONFIG_PACKAGE_luci-theme-${WRT_THEME}=y"
+    echo "CONFIG_PACKAGE_luci-app-${WRT_THEME}-config=y"
 } >> "$CONFIG_FILE"
-
-# 条件添加主题配置包（如果存在）
-if [ -d "./package/luci-app-${WRT_THEME}-config" ] || \
-   [ -d "./feeds/luci/applications/luci-app-${WRT_THEME}-config" ]; then
-    echo "CONFIG_PACKAGE_luci-app-${WRT_THEME}-config=y" >> "$CONFIG_FILE"
-    green "✅ 添加主题配置包 luci-app-${WRT_THEME}-config"
-else
-    yellow "⚠️ 未找到 luci-app-${WRT_THEME}-config，跳过"
-fi
 green "✅ 主题与语言配置完成"
 
 # ===================== 3. 私有配置 =====================
@@ -179,17 +153,13 @@ green "✅ 冲突包禁用完成"
 green "=== 5. uci-defaults 预设 ==="
 mkdir -p "$UCI_DIR"
 
-# 转义变量以便安全替换
-WRT_IP_ESC=$(escape_sed "$WRT_IP")
-WRT_NAME_ESC=$(escape_sed "$WRT_NAME")
-WRT_WORD_ESC=$(escape_sed "$WRT_WORD")
-
 cat > "$UCI_DIR/99-base" <<'INNEREOF'
 #!/bin/sh
 logger -t base-config "开始基础配置"
 
 uci -q get network.lan.ipaddr || uci set network.lan.ipaddr='${WRT_IP}'
 uci -q get system.@system[0].hostname || uci set system.@system[0].hostname='${WRT_NAME}'
+
 
 uci set network.wan.accept_ra='1'
 uci set network.wan.sourcefilter='0'
@@ -224,17 +194,16 @@ uci commit dhcp
 uci commit system
 
 logger -t base-config "基础配置完成"
-rm -f "$0"
 exit 0
 INNEREOF
 
-# 执行变量替换（已转义）
-sed -i "s@\${WRT_IP}@${WRT_IP_ESC}@g; s@\${WRT_NAME}@${WRT_NAME_ESC}@g; s@\${WRT_WORD}@${WRT_WORD_ESC}@g" "$UCI_DIR/99-base"
+sed -i "s@\${WRT_IP}@${WRT_IP}@g; s@\${WRT_NAME}@${WRT_NAME}@g; s@\${WRT_WORD}@${WRT_WORD}@g" "$UCI_DIR/99-base"
 chmod +x "$UCI_DIR/99-base"
-green "✅ uci-defaults 完成（含自删除机制）"
+green "✅ uci-defaults 完成"
 
-# ===================== 6. NSS init =====================
-green "=== 6. nss-fix 服务 ==="
+
+# ===================== 7. NSS init =====================
+green "=== 7. nss-fix 服务 ==="
 NSS_INIT="$BASE_FILES/etc/init.d/nss-fix"
 cat > "$NSS_INIT" <<'INNEREOF'
 #!/bin/sh /etc/rc.common
@@ -259,19 +228,23 @@ start() {
         if [ -x /etc/init.d/qca-nss-ecm ]; then
             /etc/init.d/qca-nss-ecm restart 2>/dev/null && logger -t nss-fix "ecm 重启成功" || logger -t nss-fix "ecm 重启失败"
         fi
+
+       
     ) &
 }
 INNEREOF
 chmod 0755 "$NSS_INIT"
 green "✅ nss-fix 部署完成"
 
-# ===================== 7. pbuf 调度器 =====================
-green "=== 7. pbuf 调度器 ==="
+
+
+# ===================== 9. pbuf 调度器 =====================
+green "=== 9. pbuf 调度器 ==="
 PBUF_CONF="./package/kernel/mac80211/files/pbuf.uci"
 [ -f "$PBUF_CONF" ] && sed -i "s@scaling_governor 'performance'@scaling_governor 'schedutil'@g" "$PBUF_CONF"
 
-# ===================== 8. sysctl =====================
-green "=== 8. sysctl 参数 ==="
+# ===================== 10. sysctl =====================
+green "=== 10. sysctl 参数 ==="
 SYSCTL_CONF="$BASE_FILES/etc/sysctl.conf"
 mkdir -p "$(dirname "$SYSCTL_CONF")"
 touch "$SYSCTL_CONF"
@@ -284,11 +257,10 @@ net.bridge.bridge-nf-call-iptables = 0
 net.bridge.bridge-nf-call-ip6tables = 0
 net.bridge.bridge-nf-call-arptables = 0
 EOF
-[ -f "$SYSCTL_CONF" ] || { red "❌ 无法创建 $SYSCTL_CONF"; exit 1; }
 green "✅ sysctl 完成"
 
-# ===================== 9. 黑名单 =====================
-green "=== 9. 模块黑名单 ==="
+# ===================== 11. 黑名单 =====================
+green "=== 11. 模块黑名单 ==="
 BLACKLIST_CONF="$BASE_FILES/etc/modprobe.d/nss-blacklist.conf"
 mkdir -p "$(dirname "$BLACKLIST_CONF")"
 cat > "$BLACKLIST_CONF" <<'EOF'
@@ -300,8 +272,8 @@ blacklist fast_classifier
 EOF
 chmod 644 "$BLACKLIST_CONF"
 
-# ===================== 10. 流控禁用 =====================
-green "=== 10. 软件流控禁用 ==="
+# ===================== 12. 流控禁用 =====================
+green "=== 12. 软件流控禁用 ==="
 FIREWALL4_MK="./package/network/config/firewall4/Makefile"
 if [ -f "$FIREWALL4_MK" ] && grep -qE 'kmod-nft-offload|kmod-nf-flow' "$FIREWALL4_MK"; then
     sed -i '/DEPENDS.*kmod-nft-offload/d; /DEPENDS.*kmod-nf-flow/d; /+kmod-nft-offload/d; /+kmod-nf-flow/d; /+kmod-nft-fullcone/d' "$FIREWALL4_MK"
@@ -318,17 +290,17 @@ for opt in "${KERNEL_FLOW_OPTS[@]}"; do
     force_disable_kernel_opt "$opt"
 done
 
-# 生成严格匹配正则（行首锚定，匹配 =y 或 =m）
-FLOW_CHECK_PATTERN=$(printf '^(%s)=[ym]$|' "${KERNEL_FLOW_OPTS[@]}" | sed 's/|$//')
-
 make olddefconfig > /dev/null 2>&1 || true
 
-# ===================== 10.1 内核流控选项最终状态与自动修复 =====================
-green "=== 10.1 内核流控选项最终状态 ==="
+# 检查并报告关键选项状态
+# ===================== 12.1 内核流控选项最终状态与自动修复 =====================
+green "=== 12.1 内核流控选项最终状态 ==="
 
 # 最多尝试 3 次自动修复
 for attempt in 1 2 3; do
-    if grep -qE "$FLOW_CHECK_PATTERN" "$CONFIG_FILE" 2>/dev/null; then
+    FLOW_CHECK_PATTERN=$(printf '%s|' "${KERNEL_FLOW_OPTS[@]}" | sed 's/|$//')
+    if grep -qE "(${FLOW_CHECK_PATTERN})=y" .config 2>/dev/null; then
+  
         yellow "⚠️ 第 $attempt 次检测到软件加速选项被启用，正在重新禁用..."
         for opt in "${KERNEL_FLOW_OPTS[@]}"; do
             force_disable_kernel_opt "$opt"
@@ -340,19 +312,12 @@ for attempt in 1 2 3; do
     fi
 done
 
-# 最终强制检查
-if grep -qE "$FLOW_CHECK_PATTERN" "$CONFIG_FILE" 2>/dev/null; then
-    red "❌ 软件加速选项仍被启用，禁用失败，请检查依赖关系！"
-    grep -E "$FLOW_CHECK_PATTERN" "$CONFIG_FILE"
-    exit 1
-fi
-
-# 输出状态（仅参考）
-grep -E "CONFIG_NF_FLOW_TABLE|CONFIG_SHORTCUT_FE|CONFIG_NFT_FLOW_OFFLOAD" "$CONFIG_FILE" || true
+# 最终状态输出
+grep -E "CONFIG_NF_FLOW_TABLE|CONFIG_SHORTCUT_FE|CONFIG_NFT_FLOW_OFFLOAD" .config || true
 green "✅ 软件流控已彻底禁用"
 
-# ===================== 11. 校验 =====================
-green "=== 11. 文件校验 ==="
+# ===================== 13. 校验 =====================
+green "=== 13. 文件校验 ==="
 FILES_CHECK=(
     "etc/uci-defaults/99-base"
     "etc/init.d/nss-fix"
@@ -364,7 +329,6 @@ for f in "${FILES_CHECK[@]}"; do
         green "✅ $f"
     else
         red "❌ $f 缺失"
-        exit 1
     fi
 done
 

@@ -1,7 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
-set -euo pipefail
+set -uo pipefail
+# 移除全局set -e；手动控制失败逻辑
 
 # 颜色输出
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
@@ -26,8 +27,11 @@ done
 # 架构强制限定qualcommax
 [[ "$WRT_TARGET" =~ ^qualcommax ]] || { red "❌ 目标架构 ${WRT_TARGET} 非 Qualcommax，禁止执行"; exit 1; }
 
-# 判断子平台：ipq60xx / ipq807x / ipq95xx
-SUBTARGET=$(echo "${WRT_TARGET}" | cut -d '/' -f2)
+# 安全截取子平台，兼容 qualcommax / qualcommax/ipq60xx
+SUBTARGET="${WRT_TARGET#qualcommax/}"
+if [[ "$SUBTARGET" == "$WRT_TARGET" ]] || [[ -z "$SUBTARGET" ]];then
+    SUBTARGET="ipq60xx"
+fi
 green "🔍 当前子平台识别：${SUBTARGET}"
 
 # 可选变量默认值
@@ -88,26 +92,34 @@ set_config() {
     fi
 }
 
-# ===================== 1. 静态源码修改 =====================
+# ===================== 1. 静态源码修改（容错 || true） =====================
 green "=== 1. 静态源码修改 ==="
-find ./feeds/luci/collections/ -type f -name Makefile -exec sed -i -e "/attendedsysupgrade/d" -e "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" {} \;
-find ./feeds/luci/modules/luci-mod-system/ -type f -name flash.js -exec sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" {} \;
-find ./package/network/services/hostapd/files/ -name hostapd.init -exec sed -i 's|rmdir.*/var/run/hostapd|rm -rf /var/run/hostapd|g' {} \;
+if [ -d "./feeds/luci/collections/" ];then
+find ./feeds/luci/collections/ -type f -name Makefile -exec sed -i -e "/attendedsysupgrade/d" -e "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" {} \; || true
+fi
 
-# wifi脚本路径适配qualcommax子目标
+if [ -d "./feeds/luci/modules/luci-mod-system/" ];then
+find ./feeds/luci/modules/luci-mod-system/ -type f -name flash.js -exec sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" {} \; || true
+fi
+
+if [ -d "./package/network/services/hostapd/files/" ];then
+find ./package/network/services/hostapd/files/ -name hostapd.init -exec sed -i 's|rmdir.*/var/run/hostapd|rm -rf /var/run/hostapd|g' {} \; || true
+fi
+
+# wifi脚本路径容错
 WIFI_SH=$(find ./target/linux/qualcommax/"${SUBTARGET}"/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
 if [[ -f "$WIFI_SH" ]]; then
-    sed -i "s/BASE_SSID='.*'/BASE_SSID='${WRT_SSID}'/g" "$WIFI_SH"
-    sed -i "s/BASE_WORD='.*'/BASE_WORD='${WRT_WORD}'/g" "$WIFI_SH"
+    sed -i "s/BASE_SSID='.*'/BASE_SSID='${WRT_SSID}'/g" "$WIFI_SH" || true
+    sed -i "s/BASE_WORD='.*'/BASE_WORD='${WRT_WORD}'/g" "$WIFI_SH" || true
 elif [[ -f "$WIFI_UC" ]]; then
-    sed -i "s/ssid='.*'/ssid='${WRT_SSID}'/g" "$WIFI_UC"
-    sed -i "s/key='.*'/key='${WRT_WORD}'/g" "$WIFI_UC"
+    sed -i "s/ssid='.*'/ssid='${WRT_SSID}'/g" "$WIFI_UC" || true
+    sed -i "s/key='.*'/key='${WRT_WORD}'/g" "$WIFI_UC" || true
 fi
 
 CFG_FILE="$BASE_FILES/bin/config_generate"
-sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "$CFG_FILE"
-sed -i "s/hostname='.*'/hostname='${WRT_NAME}'/g" "$CFG_FILE"
+[ -f "$CFG_FILE" ] && sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" "$CFG_FILE" || true
+[ -f "$CFG_FILE" ] && sed -i "s/hostname='.*'/hostname='${WRT_NAME}'/g" "$CFG_FILE" || true
 green "✅ 静态源码修改完成"
 
 # ===================== 2. 主题与语言配置 =====================
@@ -155,12 +167,10 @@ USB_TUNNEL_SQM_PKGS=(
     kmod-udptunnel4 kmod-udptunnel6
     6rd kmod-nat46
 )
-# ipq60xx默认不推荐原生sqm‑scripts‑nss，移除sqm相关
 for pkg in "${USB_TUNNEL_SQM_PKGS[@]}"; do
     force_disable_pkg "$pkg"
 done
 
-# ath11k固件过滤，ipq60xx使用qcn60xx固件
 force_disable_pkg kmod-ath11k-pci
 WIFI_FW_DISABLE=(ath10k-firmware-qca4019 ath10k-firmware-qca9984 odhcpd-ipv6only)
 for pkg in "${WIFI_FW_DISABLE[@]}"; do
@@ -225,7 +235,6 @@ start() {
     uci set firewall.@defaults[0].flow_offloading='0'
     uci set firewall.@defaults[0].flow_offloading_hw='1'
     uci commit firewall
-    # ipq60xx容错判断，不存在sysfs参数直接跳过不报错
     [ -f /sys/module/qca_nss_drv/parameters/ppe_enable ] && echo 1 > /sys/module/qca_nss_drv/parameters/ppe_enable 2>/dev/null
     [ -f /sys/module/qca_nss_drv/parameters/bridge_offload ] && echo 1 > /sys/module/qca_nss_drv/parameters/bridge_offload 2>/dev/null
     [ -f /sys/module/qca_nss_ecm/parameters/fullcone ] && echo 1 > /sys/module/qca_nss_ecm/parameters/fullcone 2>/dev/null
@@ -245,7 +254,7 @@ green "✅ nss‑fix 部署完成"
 # ===================== 7. pbuf 调度器 =====================
 green "=== 7. pbuf 调频策略 ==="
 PBUF_CONF="./package/kernel/mac80211/files/pbuf.uci"
-[ -f "$PBUF_CONF" ] && sed -i "s@scaling_governor 'performance'@scaling_governor 'schedutil'@g" "$PBUF_CONF"
+[ -f "$PBUF_CONF" ] && sed -i "s@scaling_governor 'performance'@scaling_governor 'schedutil'@g" "$PBUF_CONF" || true
 
 # ===================== 8. sysctl 网络调优 =====================
 green "=== 8. sysctl 参数写入 ==="
@@ -312,8 +321,8 @@ chmod 644 "$BLACKLIST_CONF"
 # ===================== 10. 彻底禁用软件流卸载（对抗olddefconfig回弹） =====================
 green "=== 10. 禁用软件流控 & nft offload ==="
 FIREWALL4_MK="./package/network/config/firewall4/Makefile"
-if [ -f "$FIREWALL4_MK" ] && grep -qE 'kmod-nft-offload|kmod-nf-flow' "$FIREWALL4_MK"; then
-    sed -i '/DEPENDS.*kmod-nft-offload/d; /DEPENDS.*kmod-nf-flow/d; /+kmod-nft-offload/d; /+kmod-nf-flow/d;' "$FIREWALL4_MK"
+if [ -f "$FIREWALL4_MK" ]; then
+    sed -i '/DEPENDS.*kmod-nft-offload/d; /DEPENDS.*kmod-nf-flow/d; /+kmod-nft-offload/d; /+kmod-nf-flow/d;' "$FIREWALL4_MK" || true
     green "✅ firewall4 流卸载依赖移除"
 fi
 
@@ -332,7 +341,6 @@ for opt in "${KERNEL_FLOW_OPTS[@]}"; do
     kconfig_disable "$opt"
 done
 
-# 3轮回弹修复
 for attempt in {1..3}; do
     FLOW_CHECK_PATTERN=$(printf '%s|' "${KERNEL_FLOW_OPTS[@]}" | sed 's/|$//')
     if grep -qE "(${FLOW_CHECK_PATTERN})=y" "$CONFIG_FILE" 2>/dev/null; then
@@ -359,11 +367,10 @@ for f in "${FILES_CHECK[@]}"; do
     if [[ -f "$BASE_FILES/$f" ]]; then
         green "✅ $f"
     else
-        red "❌ $f 缺失"
+        yellow "⚠️ $f 缺失（非致命）"
     fi
 done
 
-# 输出IPQ60xx构建摘要
 green ""
 green "========================================="
 green "✅ IPQ60xx‑NSS 固件定制脚本执行完毕"

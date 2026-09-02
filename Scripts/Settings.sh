@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 set -uo pipefail
-# 移除全局set -e；手动控制失败逻辑
+
 
 # 颜色输出
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
@@ -41,9 +41,8 @@ green "🔍 当前子平台识别：${SUBTARGET}"
 readonly BASE_FILES="./package/base-files/files"
 readonly UCI_DIR="$BASE_FILES/etc/uci-defaults"
 readonly CONFIG_FILE="./.config"
-readonly KCONFIG_TOOL="./scripts/config"
 
-# ===================== 配置函数（官方scripts/config锁内核选项，防回弹） =====================
+# ===================== 配置函数（编译前期无scripts/config二进制，全部用sed） =====================
 set_pkg() {
     local pkg="$1" value="${2:-y}"
     sed -i "/^CONFIG_PACKAGE_${pkg}=/d" "$CONFIG_FILE" 2>/dev/null || true
@@ -65,20 +64,16 @@ force_disable_pkg() {
 
 kconfig_disable() {
     local opt="$1"
-    if [[ -x "$KCONFIG_TOOL" ]]; then
-        "$KCONFIG_TOOL" --undefine "$opt" "$CONFIG_FILE"
-    else
-        sed -i "/^${opt}=/d" "$CONFIG_FILE" 2>/dev/null || true
-        sed -i "/^# ${opt} is not set/d" "$CONFIG_FILE" 2>/dev/null || true
-        echo "# ${opt} is not set" >> "$CONFIG_FILE"
-    fi
+    sed -i "/^${opt}=/d" "$CONFIG_FILE" 2>/dev/null || true
+    sed -i "/^# ${opt} is not set/d" "$CONFIG_FILE" 2>/dev/null || true
+    echo "# ${opt} is not set" >> "$CONFIG_FILE"
 }
 
 kconfig_enable() {
     local opt="$1"
-    if [[ -x "$KCONFIG_TOOL" ]]; then
-        "$KCONFIG_TOOL" --enable "$opt" "$CONFIG_FILE"
-    fi
+    sed -i "/^${opt}=/d" "$CONFIG_FILE" 2>/dev/null || true
+    sed -i "/^# ${opt} is not set/d" "$CONFIG_FILE" 2>/dev/null || true
+    echo "${opt}=y" >> "$CONFIG_FILE"
 }
 
 set_config() {
@@ -136,7 +131,6 @@ green "=== Enable kmod‑tcp‑bbr & kernel BBR/FQ ==="
 set_pkg "kmod-tcp-bbr" "y"
 kconfig_enable "CONFIG_TCP_CONG_BBR"
 kconfig_enable "CONFIG_NET_SCH_FQ"
-
 green "✅ 主题与语言配置完成"
 
 # ===================== 3. 私有配置加载 =====================
@@ -154,6 +148,9 @@ fi
 
 # ===================== 4. 禁用冲突包（IPQ60xx精简列表） =====================
 green "=== 4. 禁用冲突组件 ==="
+# 【关键修复】直接删除mihomo源码包，彻底消除循环依赖
+rm -rf ./package/*/mihomo-alpha ./package/*/mihomo-meta 2>/dev/null
+
 USB_TUNNEL_SQM_PKGS=(
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras
     kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-common kmod-usb-roles
@@ -177,6 +174,8 @@ for pkg in "${WIFI_FW_DISABLE[@]}"; do
     disable_pkg "$pkg"
 done
 set_pkg odhcpd y
+
+# 源码已经删除，这两行保留无害，做二次兜底
 force_disable_pkg mihomo-alpha
 force_disable_pkg mihomo-meta
 green "✅ 冲突包禁用完成"

@@ -80,11 +80,11 @@ UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-box luci-app-homeproxy luci-app-timewol luci-app-wolplus luci-app-wolultra"
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
-
-# 1. 更新 smartdns 核心包（从 package/openwrt 子目录提取）
+# 更新 smartdns 核心包（从 package/openwrt 子目录提取）
 rm -rf ../feeds/packages/net/smartdns ../feeds/luci/applications/luci-app-smartdns package/smartdns 2>/dev/null
 git clone --depth=1 --single-branch --branch master "https://github.com/pymumu/smartdns.git"
 if [ -d smartdns/package/openwrt ]; then
+    mkdir -p package          # 确保 package 目录存在
     mv smartdns/package/openwrt package/smartdns
     echo "SmartDNS 核心包已更新至 package/smartdns"
 else
@@ -94,10 +94,10 @@ else
 fi
 rm -rf smartdns
 
-# 2. 更新 LuCI 界面
+# 更新 LuCI 界面（会自动修正同名问题）
 UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "name" "luci-app-smartdns"
 
-# 3. 修正 luci-app-smartdns 的依赖（移除 smartdns-ui）
+# 修正 luci-app-smartdns 的依赖（移除 smartdns-ui）
 if [ -f package/luci-app-smartdns/Makefile ]; then
     sed -i 's/+smartdns-ui//g' package/luci-app-smartdns/Makefile
     echo "已移除 smartdns-ui 依赖"

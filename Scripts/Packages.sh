@@ -59,8 +59,6 @@ UPDATE_PACKAGE "theme-fluent" "LazuliKao/luci-theme-fluent" "main"
 
 UPDATE_PACKAGE "momo" "nikkinikki-org/OpenWrt-momo" "main"
 UPDATE_PACKAGE "nikki" "nikkinikki-org/OpenWrt-nikki" "main"
-UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
-UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"
 UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg"
 UPDATE_PACKAGE "passwall2" "Openwrt-Passwall/openwrt-passwall2" "main" "pkg"
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
@@ -83,44 +81,12 @@ UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-bo
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
 
-	# SmartDNS 自动更新（使用最新 Release）
-get_latest_smartdns_tag() {
-    local tag
-    tag=$(curl -s "https://api.github.com/repos/pymumu/smartdns/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
-    if [ -z "$tag" ]; then
-        echo "Release48.4"   # 降级为已知稳定版
-    else
-        echo "$tag"
-    fi
-}
-
-SMARTDNS_REPO="pymumu/smartdns"
-SMARTDNS_BRANCH=$(get_latest_smartdns_tag)
-SMARTDNS_TARGET="feeds/packages/net/smartdns"
-
 # 删除原有 smartdns 相关包（如果存在 luci-app，也可一并删除）
 rm -rf ../feeds/packages/net/smartdns ../feeds/luci/applications/luci-app-smartdns 2>/dev/null
+UPDATE_PACKAGE "luci-app-smartdns" "pymumu/smartdns" "master" "name" "smartdns"
 
-# 浅克隆指定标签
-git clone --depth=1 --single-branch --branch "$SMARTDNS_BRANCH" "https://github.com/$SMARTDNS_REPO.git" || {
-    echo "克隆失败，请检查网络或版本标签"
-    exit 1
-}
-
-# 提取 OpenWrt 子目录并移动到目标位置
-if [ -d "smartdns/package/openwrt" ]; then
-    mkdir -p "../$(dirname "$SMARTDNS_TARGET")"
-    mv smartdns/package/openwrt "../$SMARTDNS_TARGET"
-    echo "SmartDNS $SMARTDNS_BRANCH 已替换至 $SMARTDNS_TARGET"
-else
-    echo "错误：smartdns/package/openwrt 目录不存在，请检查仓库结构"
-    rm -rf smartdns
-    exit 1
-fi
-
-# 清理临时克隆目录
-rm -rf smartdns
-
+UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
+UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"
 
 #更新软件包版本
 UPDATE_VERSION() {
@@ -170,5 +136,4 @@ UPDATE_VERSION() {
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
 	source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
 fi
-./scripts/feeds update -i -a
-./scripts/feeds install -a
+

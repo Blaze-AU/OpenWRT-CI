@@ -91,6 +91,7 @@ else
     echo "错误：未找到 smartdns/package/openwrt 目录"
 fi
 rm -rf smartdns
+UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "name" "luci-app-smartdns"
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"
 

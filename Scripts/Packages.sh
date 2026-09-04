@@ -81,10 +81,16 @@ UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-bo
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
 
-# 删除原有 smartdns 相关包（如果存在 luci-app，也可一并删除）
-rm -rf ../feeds/packages/net/smartdns ../feeds/luci/applications/luci-app-smartdns 2>/dev/null
-UPDATE_PACKAGE "luci-app-smartdns" "pymumu/smartdns" "master" "name" "smartdns"
-
+# 更新 smartdns 核心包（从 package/openwrt 子目录提取）
+rm -rf ../feeds/packages/net/smartdns ../feeds/luci/applications/luci-app-smartdns package/smartdns 2>/dev/null
+git clone --depth=1 --single-branch --branch master "https://github.com/pymumu/smartdns.git"
+if [ -d smartdns/package/openwrt ]; then
+    mv smartdns/package/openwrt package/smartdns
+    echo "SmartDNS 核心包已更新至 package/smartdns"
+else
+    echo "错误：未找到 smartdns/package/openwrt 目录"
+fi
+rm -rf smartdns
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"
 

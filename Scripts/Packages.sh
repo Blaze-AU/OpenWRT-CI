@@ -106,7 +106,6 @@ fi
 rm -rf smartdns
 
 echo "开始更新 luci-app-smartdns..."
-UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "name" "luci-app-smartdns"
 
 # 修正位置和依赖
 if [ -f luci-app-smartdns/Makefile ]; then
@@ -125,6 +124,8 @@ fi
 # 最终强制删除残留的 package/package/smartdns（避免构建系统误认）
 rm -rf ../package/package/smartdns
 echo "已确保 ../package/package/smartdns 不存在"
+UPDATE_PACKAGE "smartdns" "pymumu/smartdns" "master" "name" "smartdns"
+UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "name" "luci-app-smartdns"
 
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"

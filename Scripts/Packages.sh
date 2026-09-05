@@ -79,30 +79,25 @@ UPDATE_PACKAGE "quickfile" "sbwml/luci-app-quickfile" "main"
 UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-box luci-app-homeproxy luci-app-timewol luci-app-wolplus luci-app-wolultra"
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
-
 # ============================================================
-# ★★★ 关键修改：smartdns 处理区块 ★★★
+# ★★★ smartdns 处理（路径已修正为 ../ 前缀） ★★★
 # ============================================================
 
-# 1. 彻底清理所有可能残留的 smartdns 相关目录
-#    包括 feeds 中的、package 下的、以及根目录下可能误放的
 echo "开始清理 smartdns 相关残留目录..."
 rm -rf ../feeds/packages/net/smartdns \
        ../feeds/luci/applications/luci-app-smartdns \
-       package/smartdns \
-       package/package/smartdns \
+       ../package/smartdns \
+       ../package/package/smartdns \
        luci-app-smartdns \
        2>/dev/null
 echo "清理完成。"
 
-# 2. 克隆 smartdns 官方仓库，提取核心包
-#    注意：只提取 package/openwrt 子目录，这是 OpenWrt 专用的 Makefile
 echo "开始克隆 smartdns 源码..."
 git clone --depth=1 --single-branch --branch master "https://github.com/pymumu/smartdns.git"
 if [ -d smartdns/package/openwrt ]; then
-    mkdir -p package          # 确保 package 目录存在
-    mv smartdns/package/openwrt package/smartdns
-    echo "✅ SmartDNS 核心包已正确放置到 package/smartdns"
+    mkdir -p ../package
+    mv smartdns/package/openwrt ../package/smartdns
+    echo "✅ SmartDNS 核心包已正确放置到 ../package/smartdns"
 else
     echo "❌ 错误：未找到 smartdns/package/openwrt 目录"
     rm -rf smartdns
@@ -110,33 +105,26 @@ else
 fi
 rm -rf smartdns
 
-# 3. 更新 LuCI 界面（使用 UPDATE_PACKAGE 函数）
-#    注意：这里会克隆 pymumu/luci-app-smartdns 并重命名为 luci-app-smartdns
 echo "开始更新 luci-app-smartdns..."
 UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "name" "luci-app-smartdns"
 
-# 4. 修正 luci-app-smartdns 的位置和依赖
-#    如果 UPDATE_PACKAGE 将包放在了根目录，需要移动到 package/ 下
+# 修正位置和依赖
 if [ -f luci-app-smartdns/Makefile ]; then
-    # 如果根目录存在，移动到 package/
-    mv luci-app-smartdns package/
-    echo "已将 luci-app-smartdns 从根目录移动到 package/"
-elif [ ! -f package/luci-app-smartdns/Makefile ]; then
-    # 如果 package/ 下也没有，报错
-    echo "⚠️ 警告：未找到 luci-app-smartdns 的 Makefile，请检查 UPDATE_PACKAGE 是否执行成功"
+    rm -rf ../package/luci-app-smartdns
+    mv luci-app-smartdns ../package/
+    echo "已将 luci-app-smartdns 从根目录移动到 ../package/"
+elif [ ! -f ../package/luci-app-smartdns/Makefile ]; then
+    echo "⚠️ 警告：未找到 ../package/luci-app-smartdns 的 Makefile"
 fi
 
-# 移除 smartdns-ui 依赖（该依赖已废弃）
-if [ -f package/luci-app-smartdns/Makefile ]; then
-    sed -i 's/+smartdns-ui//g' package/luci-app-smartdns/Makefile
+if [ -f ../package/luci-app-smartdns/Makefile ]; then
+    sed -i 's/+smartdns-ui//g' ../package/luci-app-smartdns/Makefile
     echo "✅ 已移除 smartdns-ui 依赖"
-else
-    echo "⚠️ 警告：package/luci-app-smartdns/Makefile 不存在，请检查"
 fi
 
-# ============================================================
-# 其他软件包更新（保持不变）
-# ============================================================
+# 最终强制删除残留的 package/package/smartdns（避免构建系统误认）
+rm -rf ../package/package/smartdns
+echo "已确保 ../package/package/smartdns 不存在"
 
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"

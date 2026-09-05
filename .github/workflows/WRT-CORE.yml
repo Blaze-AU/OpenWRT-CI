@@ -261,3 +261,43 @@ jobs:
             
             ### 📝 源码更新记录
             ${{ env.VERSION_INFO }}
+
+ cache-rollover:
+    name: Roll cache generations
+    needs: core
+    if: ${{ !inputs.WRT_TEST && needs.core.result == 'success' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: wrt-cache-rollover-${{github.ref}}-${{needs.core.outputs.cache_prefix}}
+      cancel-in-progress: false
+    env:
+      GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      GH_REPO: ${{github.repository}}
+      WRT_CACHE_PREFIX: ${{needs.core.outputs.cache_prefix}}
+      WRT_CACHE_KEY: ${{needs.core.outputs.cache_key}}
+    steps:
+      - name: Roll Build Cache
+        run: |
+          set -euo pipefail
+
+          CURRENT_CACHE_KEYS=$(gh cache list --repo "$GH_REPO" --key "$WRT_CACHE_KEY" --ref "$GITHUB_REF" --limit 100 --json key --jq '.[].key')
+          CURRENT_CACHE_FOUND=0
+          while IFS= read -r CACHE_KEY; do
+            if [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ]; then
+              CURRENT_CACHE_FOUND=1
+              break
+            fi
+          done <<< "$CURRENT_CACHE_KEYS"
+
+          if [ "$CURRENT_CACHE_FOUND" -ne 1 ]; then
+            echo "skip cache rollover: current cache is not available yet"
+            exit 0
+          fi
+
+          gh cache list --repo "$GH_REPO" --key "$WRT_CACHE_PREFIX-" --ref "$GITHUB_REF" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
+            while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
+              [ -n "$CACHE_ID" ] || continue
+              [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ] && continue
+              gh cache delete "$CACHE_ID" --repo "$GH_REPO" ||
+                echo "warning: failed to delete cache $CACHE_ID ($CACHE_KEY)"
+            done

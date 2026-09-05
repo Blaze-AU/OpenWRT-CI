@@ -79,53 +79,6 @@ UPDATE_PACKAGE "quickfile" "sbwml/luci-app-quickfile" "main"
 UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-box luci-app-homeproxy luci-app-timewol luci-app-wolplus luci-app-wolultra"
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
-# ============================================================
-# ★★★ smartdns 处理（路径已修正为 ../ 前缀） ★★★
-# ============================================================
-
-echo "开始清理 smartdns 相关残留目录..."
-rm -rf ../feeds/packages/net/smartdns \
-       ../feeds/luci/applications/luci-app-smartdns \
-       ../package/smartdns \
-       ../package/package/smartdns \
-       luci-app-smartdns \
-       2>/dev/null
-echo "清理完成。"
-
-echo "开始克隆 smartdns 源码..."
-git clone --depth=1 --single-branch --branch master "https://github.com/pymumu/smartdns.git"
-if [ -d smartdns/package/openwrt ]; then
-    mkdir -p ../package
-    mv smartdns/package/openwrt ../package/smartdns
-    echo "✅ SmartDNS 核心包已正确放置到 ../package/smartdns"
-else
-    echo "❌ 错误：未找到 smartdns/package/openwrt 目录"
-    rm -rf smartdns
-    exit 1
-fi
-rm -rf smartdns
-
-echo "开始更新 luci-app-smartdns..."
-
-# 修正位置和依赖
-if [ -f luci-app-smartdns/Makefile ]; then
-    rm -rf ../package/luci-app-smartdns
-    mv luci-app-smartdns ../package/
-    echo "已将 luci-app-smartdns 从根目录移动到 ../package/"
-elif [ ! -f ../package/luci-app-smartdns/Makefile ]; then
-    echo "⚠️ 警告：未找到 ../package/luci-app-smartdns 的 Makefile"
-fi
-
-if [ -f ../package/luci-app-smartdns/Makefile ]; then
-    sed -i 's/+smartdns-ui//g' ../package/luci-app-smartdns/Makefile
-    echo "✅ 已移除 smartdns-ui 依赖"
-fi
-
-# 最终强制删除残留的 package/package/smartdns（避免构建系统误认）
-rm -rf ../package/package/smartdns
-echo "已确保 ../package/package/smartdns 不存在"
-UPDATE_PACKAGE "smartdns" "pymumu/smartdns" "master" "name" "smartdns"
-UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master" "name" "luci-app-smartdns"
 
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev" "" "adguardhome"

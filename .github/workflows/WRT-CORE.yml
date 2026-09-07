@@ -40,7 +40,7 @@ on:
       WRT_PACKAGE:
         required: false
         type: string
-      # ====== 新增：WRT_TEST 输入定义 ======
+      # ===== 新增：WRT_TEST 输入定义 =====
       WRT_TEST:
         required: false
         default: false
@@ -59,7 +59,7 @@ env:
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
   WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
-  # ====== 新增：WRT_TEST 环境变量 ======
+  # ===== 新增：WRT_TEST 环境变量 =====
   WRT_TEST: ${{inputs.WRT_TEST}}
 
 jobs:

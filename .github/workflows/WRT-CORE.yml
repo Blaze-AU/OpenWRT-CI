@@ -40,6 +40,11 @@ on:
       WRT_PACKAGE:
         required: false
         type: string
+      # ====== 新增：WRT_TEST 输入定义 ======
+      WRT_TEST:
+        required: false
+        default: false
+        type: boolean
 
 env:
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
@@ -54,7 +59,8 @@ env:
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
   WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
-  
+  # ====== 新增：WRT_TEST 环境变量 ======
+  WRT_TEST: ${{inputs.WRT_TEST}}
 
 jobs:
   core:
@@ -274,10 +280,7 @@ jobs:
             - 📦 插件列表：${{ env.WRT_LIST }}
             
             ### 📝 源码更新记录
-            ${{ env.VERSION_INFO }}RT_WORD}}
-
-            内核版本：${{env.WRT_KVER}}
-            插件列表：${{env.WRT_LIST}}
+            ${{ env.VERSION_INFO }}
 
   cache-rollover:
     name: Roll cache generations

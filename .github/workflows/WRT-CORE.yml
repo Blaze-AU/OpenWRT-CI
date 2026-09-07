@@ -58,7 +58,7 @@ env:
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
   WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
-  WRT_TEST: ${{inputs.WRT_TEST}}
+  WRT_TEST: ${{ inputs.TEST == 'true' }}
 
 jobs:
   core:

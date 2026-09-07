@@ -62,7 +62,7 @@ jobs:
       WRT_BRANCH: ${{matrix.BRANCH}}
       #源码名称
       WRT_SOURCE: ${{matrix.SOURCE}}/LibWrt
-      #插件调整
-      WRT_PACKAGE: ${{inputs.PACKAGE}}
-      #仅输出配置文件
-      WRT_TEST: ${{inputs.TEST}}
+      #插件调整（修正：防止自动触发时为空）
+      WRT_PACKAGE: ${{ inputs.PACKAGE || '' }}
+      #仅输出配置文件（修正：转换为布尔值，防止空字符串）
+      WRT_TEST: ${{ inputs.TEST == 'true' }}

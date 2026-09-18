@@ -131,7 +131,6 @@ UPDATE_VERSION() {
 #UPDATE_VERSION "软件包名" "测试版，true，可选，默认为否"
 #UPDATE_VERSION "sing-box"
 
-
 # ============================================================
 # 引入私有扩展脚本
 # ============================================================
@@ -140,5 +139,9 @@ if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
 	source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
 fi
 
+# ==========修复这里==========
+# 切回OpenWrt根目录执行feeds
+cd "$GITHUB_WORKSPACE"
 ./scripts/feeds update -i -a
 ./scripts/feeds install -a
+cd "$GITHUB_WORKSPACE/Scripts"

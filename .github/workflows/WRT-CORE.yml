@@ -159,20 +159,10 @@ jobs:
           echo "1" > ./wrt/tmp/.build
           echo "restored build cache: ${{steps.cache-restore.outputs.cache-matched-key}}"
 
-      - name: Update Feeds
+      - name: Update Feeds(更新feeds)
         run: |
-          cd ./wrt/
-
+          cd "$OPENWRT_PATH"
           ./scripts/feeds update -a
-
-          # 修复 qca‑nss‑ecm nss_rmnet_rx_get_ifnum 符号未定义
-          if [ -f feeds/nss_packages/qca-nss-ecm/Makefile ]; then
-            sed -i '/ECM_INTERFACE_BOND_ENABLE=y \\/a \\\tECM_RMNET_ENABLE=n \\' feeds/nss_packages/qca-nss-ecm/Makefile
-            echo "==== DEBUG ECM_RMNET_ENABLE ===="
-            grep ECM_RMNET_ENABLE feeds/nss_packages/qca-nss-ecm/Makefile
-          fi
-
-          ./scripts/feeds install -a
 
       - name: Custom Packages
         run: |

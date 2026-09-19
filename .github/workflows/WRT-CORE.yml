@@ -40,7 +40,6 @@ on:
       WRT_PACKAGE:
         required: false
         type: string
-      # ===== 新增：WRT_TEST 输入定义 =====
       WRT_TEST:
         required: false
         default: false
@@ -59,7 +58,6 @@ env:
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
   WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
-  # ===== 新增：WRT_TEST 环境变量 =====
   WRT_TEST: ${{inputs.WRT_TEST}}
 
 jobs:
@@ -159,10 +157,12 @@ jobs:
           echo "1" > ./wrt/tmp/.build
           echo "restored build cache: ${{steps.cache-restore.outputs.cache-matched-key}}"
 
-      - name: Update Feeds(更新feeds)
+      - name: Update Feeds
         run: |
-          cd "$OPENWRT_PATH"
+          cd ./wrt/
+
           ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
       - name: Custom Packages
         run: |
@@ -183,7 +183,7 @@ jobs:
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
-          make defconfig && make clean
+          make defconfig -j$(nproc) && make clean -j$(nproc)
 
       - name: Download Packages
         if: ${{ !inputs.WRT_TEST }}
@@ -221,22 +221,15 @@ jobs:
           du -h --max-depth=1
           echo "======================="
 
-      - name: Package Firmware  打包固件
+      - name: Package Firmware
         run: |
           cd ./wrt/ && mkdir ./upload/
 
           cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE".txt
 
-          if [[ $WRT_TEST != 'true' ]]; then
+          if [[ "$WRT_TEST" != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
             echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
-
-            COMMIT_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
-            {
-              echo "VERSION_INFO<<EOF"
-              echo "$COMMIT_INFO"
-              echo "EOF"
-            } >> $GITHUB_ENV
 
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
@@ -249,36 +242,36 @@ jobs:
 
             find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
 
-            make clean
+            make clean -j$(nproc)
           fi
 
-      - name: Release Firmware 发布固件到
+      - name: Release Firmware
         uses: softprops/action-gh-release@master
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
           files: ./wrt/upload/*.*
           body: |
-            ### 📦 固件信息
-            - 🏷️ 配置名称：${{env.WRT_CONFIG}}
-            - 🎨 主题：${{env.WRT_THEME}}
-            - 📱 设备名称：${{env.WRT_NAME}}
-            - 💻 源码仓库：${{env.WRT_REPO}}
-            - 🌿 源码分支：${{env.WRT_BRANCH}}
-            - 🔖 提交哈希：${{env.WRT_HASH}}
-            - 🎯 目标平台：${{env.WRT_TARGET}}
-            
-            ### 🌐 网络设置
-            - 📍 默认IP：${{env.WRT_IP}}
-            - 🔑 登录密码：${{env.WRT_PW}}
-            - 📶 WiFi名称：${{env.WRT_SSID}}
-            - 🔐 WiFi密码：${{env.WRT_WORD}}
-            
-            ### 🧊 固件版本
-            - 🧩 内核版本：**${{ env.WRT_KVER }}**
-            - 📦 插件列表：${{ env.WRT_LIST }}
-            
-            ### 📝 源码更新记录
-            ${{ env.VERSION_INFO }}
+            这是个平台固件包，内含多个设备！
+            请注意选择你需要的设备固件！
+            不要问，刷就完事了！
+
+            全系带开源硬件加速，别问了！
+
+            源码：${{env.WRT_REPO}}
+            分支：${{env.WRT_BRANCH}}
+            提交：${{env.WRT_HASH}}
+
+            配置：${{env.WRT_CONFIG}}
+            平台：${{env.WRT_TARGET}}
+
+            登录地址：${{env.WRT_IP}}
+            登录密码：${{env.WRT_PW}}
+
+            WIFI名称：${{env.WRT_SSID}}
+            WIFI密码：${{env.WRT_WORD}}
+
+            内核版本：${{env.WRT_KVER}}
+            插件列表：${{env.WRT_LIST}}
 
   cache-rollover:
     name: Roll cache generations

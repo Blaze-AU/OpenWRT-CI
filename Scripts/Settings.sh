@@ -90,7 +90,8 @@ set_config() {
 # ===================== 1. 静态源码修改（容错 || true） =====================
 green "=== 1. 静态源码修改 ==="
 if [ -d "./feeds/luci/collections/" ];then
-find ./feeds/luci/collections/ -type f -name Makefile -exec sed -i -e "/attendedsysupgrade/d" -e "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" {} \; || true
+find ./feeds/luci/collections/ -type f -name Makefile -exec sed -i \
+    -e "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" {} \; || true
 fi
 
 if [ -d "./feeds/luci/modules/luci-mod-system/" ];then
@@ -146,39 +147,20 @@ if [[ -n "$WRT_PACKAGE" ]]; then
     done <<< "$WRT_PACKAGE"
 fi
 
-# ===================== 4. 禁用冲突包（IPQ60xx精简列表） =====================
-green "=== 4. 禁用冲突组件 ==="
-# 【关键修复】直接删除mihomo源码包，彻底消除循环依赖
-rm -rf ./package/*/mihomo-alpha ./package/*/mihomo-meta 2>/dev/null
-
-USB_TUNNEL_SQM_PKGS=(
+# ===================== 4. 禁用 USB / 存储 / 文件系统 =====================
+green "=== 4. 禁用 USB / 存储 / 文件系统组件 ==="
+USB_STORAGE_PKGS=(
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras
     kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-common kmod-usb-roles
     kmod-usb-storage-uas kmod-usb-xhci-hcd block-mount automount
     f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
     kmod-scsi-core kmod-fs-exfat kmod-fs-ext4 kmod-fs-f2fs kmod-fs-ntfs3 kmod-fs-vfat
-    kmod-ebtables kmod-l2tp kmod-pptp kmod-ipt-nathelper-rtsp
     f2fsck
-    kmod-gre kmod-gre6 kmod-vxlan kmod-sit kmod-ipip
-    kmod-iptunnel kmod-iptunnel4 kmod-iptunnel6
-    kmod-udptunnel4 kmod-udptunnel6
-    6rd kmod-nat46
 )
-for pkg in "${USB_TUNNEL_SQM_PKGS[@]}"; do
+for pkg in "${USB_STORAGE_PKGS[@]}"; do
     force_disable_pkg "$pkg"
 done
-
-force_disable_pkg kmod-ath11k-pci
-WIFI_FW_DISABLE=(ath10k-firmware-qca4019 ath10k-firmware-qca9984 odhcpd-ipv6only)
-for pkg in "${WIFI_FW_DISABLE[@]}"; do
-    disable_pkg "$pkg"
-done
-set_pkg odhcpd y
-
-# 源码已经删除，这两行保留无害，做二次兜底
-force_disable_pkg mihomo-alpha
-force_disable_pkg mihomo-meta
-green "✅ 冲突包禁用完成"
+green "✅ USB / 存储禁用完成"
 
 # ===================== 5. uci‑defaults 基础预设 =====================
 green "=== 5. uci‑defaults 基础预设 ==="
@@ -317,42 +299,31 @@ blacklist fast_classifier
 EOF
 chmod 644 "$BLACKLIST_CONF"
 
-# ===================== 10. 彻底禁用软件流卸载（对抗olddefconfig回弹） =====================
-green "=== 10. 禁用软件流控 & nft offload ==="
+# ===================== 10. 禁用软件流卸载相关包 =====================
+green "=== 10. 禁用软件流控 & nft offload 包 ==="
+
+# 移除 firewall4 对流卸载模块的依赖
 FIREWALL4_MK="./package/network/config/firewall4/Makefile"
 if [ -f "$FIREWALL4_MK" ]; then
     sed -i '/DEPENDS.*kmod-nft-offload/d; /DEPENDS.*kmod-nf-flow/d; /+kmod-nft-offload/d; /+kmod-nf-flow/d;' "$FIREWALL4_MK" || true
     green "✅ firewall4 流卸载依赖移除"
 fi
 
-FLOW_PKGS=(kmod-nf-flow kmod-nft-offload kmod-shortcut-fe kmod-fast-classifier kmod-nf-conntrack-netlink kmod-ipt-offload kmod-nf-flow-ipv4 kmod-nf-flow-ipv6)
+# 包级别禁用软件流卸载相关
+FLOW_PKGS=(
+    kmod-nf-flow
+    kmod-nft-offload
+    kmod-shortcut-fe
+    kmod-fast-classifier
+    kmod-nf-conntrack-netlink
+    kmod-ipt-offload
+    kmod-nf-flow-ipv4
+    kmod-nf-flow-ipv6
+)
 for pkg in "${FLOW_PKGS[@]}"; do
     force_disable_pkg "$pkg"
 done
-
-KERNEL_FLOW_OPTS=(
-CONFIG_NF_FLOW_TABLE CONFIG_NF_FLOW_TABLE_IPV4 CONFIG_NF_FLOW_TABLE_IPV6
-CONFIG_NF_FLOW_TABLE_INET CONFIG_NFT_FLOW_OFFLOAD CONFIG_NETFILTER_XT_MATCH_FLOW
-CONFIG_NETFILTER_XT_TARGET_FLOW CONFIG_NETFILTER_FLOW_TABLE CONFIG_NFT_TUNNEL
-CONFIG_SHORTCUT_FE CONFIG_SHORTCUT_FE_DRV
-)
-for opt in "${KERNEL_FLOW_OPTS[@]}"; do
-    kconfig_disable "$opt"
-done
-
-for attempt in {1..3}; do
-    FLOW_CHECK_PATTERN=$(printf '%s|' "${KERNEL_FLOW_OPTS[@]}" | sed 's/|$//')
-    if grep -qE "(${FLOW_CHECK_PATTERN})=y" "$CONFIG_FILE" 2>/dev/null; then
-        yellow "⚠️ 第 ${attempt} 次检测到流控回弹，重新锁定..."
-        for opt in "${KERNEL_FLOW_OPTS[@]}"; do
-            kconfig_disable "$opt"
-        done
-        make olddefconfig > /dev/null 2>&1 || true
-    else
-        green "✅ 软件加速选项全部禁用（第 ${attempt} 轮校验通过）"
-        break
-    fi
-done
+green "✅ 软件流卸载包禁用完成"
 
 # ===================== 11. 文件完整性校验 =====================
 green "=== 11. 文件校验 ==="

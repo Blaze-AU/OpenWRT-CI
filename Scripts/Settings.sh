@@ -2,14 +2,25 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
+green()  { echo -e "\033[32m$*\033[0m"; }
+yellow() { echo -e "\033[33m$*\033[0m"; }
+red()    { echo -e "\033[31m$*\033[0m"; }
+
+force_disable_pkg() {
+    local pkg="$1"
+    # 从 .config 中删除已选中的该包
+    sed -i "/^CONFIG_PACKAGE_${pkg}=/d" ./.config
+    sed -i "/^CONFIG_${pkg}=/d"        ./.config
+    # 强制禁用
+    echo "# CONFIG_PACKAGE_${pkg} is not set" >> ./.config
+}
+
 #移除luci-app-attendedsysupgrade
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile")
 #修改默认主题
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
 #修改immortalwrt.lan关联IP
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js")
-#添加编译日期标识
-sed -i "s/(\(luciversion || ''\))/(\1) + (' \/ $WRT_MARK-$WRT_DATE')/g" $(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js")
 
 WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
@@ -47,6 +58,29 @@ fi
 if [ -n "$WRT_PACKAGE" ]; then
 	echo -e "$WRT_PACKAGE" >> ./.config
 fi
+
+# ===================== 4. 禁用 USB / 存储 / 文件系统 =====================
+green "=== 4. 禁用 USB / 存储 / 文件系统组件 ==="
+USB_STORAGE_PKGS=(
+    kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras
+    kmod-usb-dwc3 kmod-usb-dwc3-qcom kmod-usb-common kmod-usb-roles
+    kmod-usb-storage-uas kmod-usb-xhci-hcd block-mount automount
+    f2fs-tools e2fsprogs ntfs3-mount mkf2fs losetup
+    kmod-scsi-core kmod-fs-exfat kmod-fs-ext4 kmod-fs-f2fs kmod-fs-ntfs3 kmod-fs-vfat
+    f2fsck
+)
+for pkg in "${USB_STORAGE_PKGS[@]}"; do
+    force_disable_pkg "$pkg"
+done
+green "✅ USB / 存储禁用完成"
+
+
+# ===================== 7. pbuf 调度器 =====================
+green "=== 7. pbuf 调频策略 ==="
+PBUF_CONF="./package/kernel/mac80211/files/pbuf.uci"
+[ -f "$PBUF_CONF" ] && sed -i "s@scaling_governor 'performance'@scaling_governor 'schedutil'@g" "$PBUF_CONF" || true
+
+
 
 #无WIFI配置标志
 if [[ "${WRT_CONFIG,,}" == *"wifi"* && "${WRT_CONFIG,,}" == *"no"* ]]; then

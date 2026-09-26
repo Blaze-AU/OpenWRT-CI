@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-#云编译公用核心
 name: WRT-CORE
 
 on:
@@ -125,7 +124,6 @@ jobs:
           echo "WRT_CACHE_KEY=$WRT_CACHE_PREFIX-$WRT_HASH" >> $GITHUB_ENV
           echo "cache_key=$WRT_CACHE_PREFIX-$WRT_HASH" >> "$GITHUB_OUTPUT"
 
-          # GitHub Action 移除国内下载源
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
@@ -157,46 +155,79 @@ jobs:
           echo "1" > ./wrt/tmp/.build
           echo "restored build cache: ${{steps.cache-restore.outputs.cache-matched-key}}"
 
+      # ===== 关键：修正 NSS feed 分支（必须在 feeds update 之前） =====
+      - name: Fix NSS Feed Branch
+        run: |
+          cd ./wrt/
+          FEEDS_CONF="./feeds.conf.default"
+          if [ ! -f "$FEEDS_CONF" ]; then
+            echo "❌ feeds.conf.default 不存在"
+            exit 1
+          fi
+
+          if grep -q "nss_packages" "$FEEDS_CONF"; then
+            sed -i 's|^src-git nss_packages .*|src-git nss_packages https://github.com/qosmio/nss-packages.git;NSS-12.5-K6.x|' "$FEEDS_CONF"
+            echo "✅ nss_packages 已修正为 NSS-12.5-K6.x"
+          else
+            echo "src-git nss_packages https://github.com/qosmio/nss-packages.git;NSS-12.5-K6.x" >> "$FEEDS_CONF"
+            echo "✅ nss_packages 已追加"
+          fi
+
+          if ! grep -q "sqm_scripts_nss" "$FEEDS_CONF"; then
+            echo "src-git sqm_scripts_nss https://github.com/qosmio/sqm-scripts-nss.git" >> "$FEEDS_CONF"
+            echo "✅ sqm_scripts_nss 已追加"
+          fi
+
+          echo "--- NSS 相关 feed ---"
+          grep -E "nss" "$FEEDS_CONF" || true
+
       - name: Update Feeds
         run: |
           cd ./wrt/
-
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+      # ===== 关键：验证 NSS feed 真的拉到了 wifili =====
+      - name: Verify NSS Wi-Fi Feed
+        run: |
+          cd ./wrt/
+          echo "=== NSS feed 内容检查 ==="
+          if [ -d "./feeds/nss_packages/qca-nss-clients" ]; then
+            echo "✅ qca-nss-clients 已拉取"
+            ls ./feeds/nss_packages/qca-nss-clients/ | head -30
+          else
+            echo "❌ qca-nss-clients 未拉取"
+          fi
+          echo "--- 查找 wifi/wifili 相关目录 ---"
+          find ./feeds/nss_packages -maxdepth 3 -type d -iname "*wifi*" 2>/dev/null || true
 
       - name: Custom Packages
         run: |
           cd ./wrt/
-
           $GITHUB_WORKSPACE/Scripts/Packages.sh
           $GITHUB_WORKSPACE/Scripts/Handles.sh
 
       - name: Custom Settings
         run: |
           cd ./wrt/
-
           if [[ "${WRT_CONFIG,,}" == *"test"* ]]; then
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
           else
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
           fi
-
           $GITHUB_WORKSPACE/Scripts/Settings.sh
-
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
       - name: Download Packages
         if: ${{ !inputs.WRT_TEST }}
         run: |
           cd ./wrt/
-
           make download -j$(nproc)
 
       - name: Compile Firmware
         if: ${{ !inputs.WRT_TEST }}
         run: |
           cd ./wrt/
-
           make -j$(nproc) || make -j1 V=s
 
       - name: Save Build Cache
@@ -212,7 +243,6 @@ jobs:
       - name: Machine Information
         run: |
           cd ./wrt/
-
           echo "======================="
           lscpu | grep -E "name|Core|Thread"
           echo "======================="
@@ -224,24 +254,18 @@ jobs:
       - name: Package Firmware
         run: |
           cd ./wrt/ && mkdir ./upload/
-
           cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE".txt
-
           if [[ "$WRT_TEST" != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
             echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
-
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
-
             for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
               EXT=$(basename $FILE | cut -d '.' -f 2-)
               NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
               NEW_FILE="$NAME"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$WRT_DATE"."$EXT"
               mv -f $FILE ./upload/$NEW_FILE
             done
-
             find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
-
             make clean -j$(nproc)
           fi
 

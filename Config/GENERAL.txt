@@ -102,8 +102,9 @@ CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
 
 # ==================== NSS 上游集合（核心 + 硬件加速 + 1GB硬改） ====================
 # 1GB内存关键配置
+CONFIG_NSS_FIRMWARE_VERSION_12_5=y
 CONFIG_NSS_MEM_PROFILE_HIGH=y
-CONFIG_ATH11K_MEM_PROFILE_1024M=y
+CONFIG_ATH11K_MEM_PROFILE_512M=y
 CONFIG_IPQ_MEM_PROFILE=1024
 
 # NSS 核心驱动

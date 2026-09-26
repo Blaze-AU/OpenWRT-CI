@@ -29,8 +29,8 @@ jobs:
       fail-fast: false
       matrix:
         CONFIG: [IPQ60XX-WIFI-YES]
-        SOURCE: [LiBwrt/LibWrt]
-        BRANCH: [25.12-nss]
+        SOURCE: [VIKINGYFY/immortalwrt]
+        BRANCH: [main]
 
     uses: ./.github/workflows/WRT-CORE.yml
     with:

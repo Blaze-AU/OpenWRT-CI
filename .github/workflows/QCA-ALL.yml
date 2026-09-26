@@ -29,8 +29,8 @@ jobs:
       fail-fast: false
       matrix:
         CONFIG: [IPQ60XX-WIFI-YES]
-        SOURCE: [qosmio/openwrt-ipq]
-        BRANCH: [main-nss]
+        SOURCE: [LiBwrt/LibWrt]
+        BRANCH: [25.12-nss]
 
     uses: ./.github/workflows/WRT-CORE.yml
     with:

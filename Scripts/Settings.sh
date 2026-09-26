@@ -8,11 +8,12 @@ red()    { echo -e "\033[31m$*\033[0m"; }
 
 # ===================== 工具函数 =====================
 # 优先用 OpenWrt 自带 scripts/config；不存在时回退到 sed 全形态清理
+# 注意：用 -f 判断，避免把目录误判为可执行文件
 force_disable_pkg() {
     local pkg="$1"
     local cfg="./.config"
 
-    if [ -x "./scripts/config" ]; then
+    if [ -f "./scripts/config" ] && [ -x "./scripts/config" ]; then
         ./scripts/config --disable "PACKAGE_${pkg}"
     else
         sed -i "/^CONFIG_PACKAGE_${pkg}=/d"             "$cfg"
@@ -23,24 +24,16 @@ force_disable_pkg() {
     fi
 }
 
-# 兼容 bash 3.x
 to_lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 to_upper() { echo "$1" | tr '[:lower:]' '[:upper:]'; }
-
-# 单引号转义，用于 uci set xxx='...' 场景
 sq_escape() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
 
 # ===================== 主题 / IP =====================
-# 移除 luci-app-attendedsysupgrade
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile")
-
-# 修改默认主题
 sed -i "s/luci-theme-bootstrap/luci-theme-${WRT_THEME}/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
-
-# 修改 immortalwrt.lan 关联 IP
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/${WRT_IP}/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js")
 
-# ===================== WiFi：只改 set-wireless.sh，不动 mac80211.uc =====================
+# ===================== WiFi =====================
 WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
 if [ -n "$WIFI_SH" ]; then
     for f in $WIFI_SH; do
@@ -59,7 +52,7 @@ if [ -f "$CFG_FILE" ]; then
     sed -i "s/hostname='.*'/hostname='${WRT_NAME}'/g" "$CFG_FILE"
 fi
 
-# ===================== 基础配置写入 .config =====================
+# ===================== 基础配置 =====================
 {
     echo "CONFIG_PACKAGE_luci=y"
     echo "CONFIG_LUCI_LANG_zh_Hans=y"
@@ -67,18 +60,16 @@ fi
     echo "CONFIG_PACKAGE_luci-app-${WRT_THEME}-config=y"
 } >> ./.config
 
-# ===================== 引入私有扩展配置 =====================
 if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
     echo "Applying private configurations from PRIVATE.txt..."
     cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt" >> ./.config
 fi
 
-# ===================== 手动调整的插件 =====================
 if [ -n "$WRT_PACKAGE" ]; then
     echo -e "$WRT_PACKAGE" >> ./.config
 fi
 
-# ===================== 4. 禁用 USB / 存储 / 文件系统 =====================
+# ===================== 4. 禁用 USB / 存储 =====================
 green "=== 4. 禁用 USB / 存储 / 文件系统组件 ==="
 USB_STORAGE_PKGS=(
     kmod-usb-core kmod-usb3 kmod-usb-storage kmod-usb-storage-extras
@@ -107,24 +98,24 @@ else
     yellow "ℹ️ 未找到 pbuf.uci，跳过"
 fi
 
-# ===================== 93-wifi-config：WiFi 基础配置 =====================
+# ===================== 93-wifi-config =====================
 green "=== 93-wifi-config：WiFi 基础配置 ==="
 SAFE_SSID=$(sq_escape "$WRT_SSID")
 SAFE_WORD=$(sq_escape "$WRT_WORD")
 
-cat > ./package/base-files/files/etc/uci-defaults/93-wifi-config << EOF
+UCI_DEFAULTS_DIR="./package/base-files/files/etc/uci-defaults"
+mkdir -p "$UCI_DEFAULTS_DIR"
+
+cat > "$UCI_DEFAULTS_DIR/93-wifi-config" << EOF
 #!/bin/sh
-# 确保 wireless 配置存在（uci-defaults 可能早于 wifi config 执行）
 [ -e /etc/config/wireless ] || wifi config
 
-# wifi-device：启用、国家码、日志级别
 for dev in \$(uci show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-device\$/\1/p'); do
     uci set wireless.\$dev.disabled='0'
     uci set wireless.\$dev.country='CN'
     uci set wireless.\$dev.log_level='1'
 done
 
-# wifi-iface：SSID、密码、加密、apsd
 for iface in \$(uci show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface\$/\1/p'); do
     uci set wireless.\$iface.ssid='${SAFE_SSID}'
     uci set wireless.\$iface.key='${SAFE_WORD}'
@@ -140,7 +131,9 @@ green "✅ 93-wifi-config 已生成（SSID=${WRT_SSID}, 加密=psk2+ccmp）"
 # ===================== 无 WIFI 配置标志 =====================
 WRT_CONFIG_LC=$(to_lower "$WRT_CONFIG")
 if [[ "$WRT_CONFIG_LC" == *wifi* && "$WRT_CONFIG_LC" == *no* ]]; then
-    echo "WRT_WIFI=wifi-no" >> "$GITHUB_ENV"
+    if [ -n "$GITHUB_ENV" ]; then
+        echo "WRT_WIFI=wifi-no" >> "$GITHUB_ENV"
+    fi
 fi
 
 # ===================== 高通平台调整 =====================
@@ -152,4 +145,24 @@ if [[ "$WRT_TARGET_UC" == *QUALCOMMAX* ]]; then
             sed -i '/nowifi/!s/ipq\(6018\|8074\)\.dtsi/ipq\1-nowifi.dtsi/g' {} +
         echo "qualcommax set up nowifi successfully!"
     fi
+fi
+
+# ===================== NSS 配置自检 =====================
+green "=== NSS 配置自检 ==="
+if [ -f "./.config" ]; then
+    for key in \
+        CONFIG_PACKAGE_kmod-qca-nss-drv \
+        CONFIG_PACKAGE_kmod-qca-nss-drv-wifi \
+        CONFIG_PACKAGE_MAC80211_NSS_SUPPORT \
+        CONFIG_ATH11K_NSS_SUPPORT \
+        CONFIG_NSS_DRV_WIFIOFFLOAD_ENABLE
+    do
+        if grep -q "^${key}=y" ./.config; then
+            green "✅ ${key}=y"
+        elif grep -q "^# ${key} is not set" ./.config; then
+            yellow "⚠️ ${key} 被显式禁用"
+        else
+            red "❌ ${key} 未出现在 .config 中"
+        fi
+    done
 fi

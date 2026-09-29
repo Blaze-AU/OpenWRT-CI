@@ -1,6 +1,12 @@
 #!/bin/bash
-# SPDX-License-Identifier: MIT
-# Copyright (C) 2026 VIKINGYFY
+set -e
+
+green() { echo -e "\033[32m$*\033[0m"; }
+sq_escape() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
+
+UCI_DIR="./package/base-files/files/etc/uci-defaults"
+BUILD_DIR="${BUILD_DIR:-$GITHUB_WORKSPACE}"
+
 
 #移除luci-app-attendedsysupgrade
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile")
@@ -8,8 +14,6 @@ sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "M
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
 #修改immortalwrt.lan关联IP
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js")
-#添加编译日期标识
-sed -i "s/(\(luciversion || ''\))/(\1) + (' \/ $WRT_MARK-$WRT_DATE')/g" $(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js")
 
 WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
@@ -52,6 +56,54 @@ fi
 if [[ "${WRT_CONFIG,,}" == *"wifi"* && "${WRT_CONFIG,,}" == *"no"* ]]; then
 	echo "WRT_WIFI=wifi-no" >> $GITHUB_ENV
 fi
+
+green "=== 3. uci-defaults 预设 ==="
+mkdir -p "$UCI_DIR"
+
+cat > "$UCI_DIR/92-ntp-dns" << 'NTPEOF'
+#!/bin/sh
+uci -q set system.ntp.enabled='1'
+uci -q set system.ntp.enable_server='0'
+uci -q delete system.ntp.server
+uci -q add_list system.ntp.server='cn.ntp.org.cn'
+uci -q add_list system.ntp.server='ntp.aliyun.com'
+uci commit system
+exit 0
+NTPEOF
+chmod +x "$UCI_DIR/92-ntp-dns"
+
+SAFE_SSID="$(sq_escape "$WRT_SSID")"
+SAFE_WORD="$(sq_escape "$WRT_WORD")"
+cat > "$UCI_DIR/93-wifi-config" << WIFIEOF
+#!/bin/sh
+[ -e /etc/config/wireless ] || wifi config
+
+for dev in \$(uci show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-device\$/\1/p'); do
+    uci set wireless.\$dev.disabled='0'
+    uci set wireless.\$dev.country='CN'
+    uci set wireless.\$dev.log_level='1'
+done
+
+for iface in \$(uci show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface\$/\1/p'); do
+    uci set wireless.\$iface.ssid='${SAFE_SSID}'
+    uci set wireless.\$iface.key='${SAFE_WORD}'
+    uci set wireless.\$iface.encryption='psk2+ccmp'
+    uci set wireless.\$iface.apsd='0'
+done
+
+uci commit wireless
+exit 0
+WIFIEOF
+chmod +x "$UCI_DIR/93-wifi-config"
+
+green "✅ uci-defaults 完成"
+
+# ==================== 3. NSS PBUF 性能调度优化 ====================
+update_nss_pbuf_performance() {
+    local conf="$BUILD_DIR/package/kernel/mac80211/files/pbuf.uci"
+    sed -i "s/auto_scale '1'/auto_scale 'off'/g; s/scaling_governor 'performance'/scaling_governor 'schedutil'/g" "$conf" 2>/dev/null || true
+    green "NSS PBUF: 自动缩放关闭，CPU调度器切换 schedutil"
+}
 
 #高通平台调整
 DTS_PATH="./target/linux/qualcommax/dts/"

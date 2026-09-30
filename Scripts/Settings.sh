@@ -98,15 +98,24 @@ chmod +x "$UCI_DIR/93-wifi-config"
 
 green "✅ uci-defaults 完成"
 
-# ===== CPU调速器统一schedutil（按需调频） =====
- for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
-      if [ -f "$cpu/cpufreq/scaling_available_governors" ] && \
-               grep -q "schedutil" "$cpu/cpufreq/scaling_available_governors" 2>/dev/null; then
-                echo "schedutil" > "$cpu/cpufreq/scaling_governor" 2>/dev/null
-     else
-                echo "ondemand" > "$cpu/cpufreq/scaling_governor" 2>/dev/null
-       fi
- done
+# ==================== NSS PBUF 动态策略 ====================
+update_nss_pbuf_performance() {
+    local conf="./package/kernel/mac80211/files/pbuf.uci"
+    if [ -f "$conf" ]; then
+        mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        mem_mb=$((mem_total / 1024))
+        if [ ${mem_mb} -le 256 ]; then
+            sed -i "s/auto_scale '1'/auto_scale 'off'/g" "$conf" 2>/dev/null
+            green "✅ NSS PBUF: 内存 ${mem_mb}MB <= 256，auto_scale 关闭以节省内存"
+        else
+            sed -i "s/auto_scale 'off'/auto_scale '1'/g" "$conf" 2>/dev/null
+            green "✅ NSS PBUF: 内存 ${mem_mb}MB > 256，auto_scale 开启"
+        fi
+        sed -i "s/scaling_governor 'performance'/scaling_governor 'schedutil'/g" "$conf" 2>/dev/null
+        green "✅ NSS PBUF: CPU 调度器确保为 schedutil"
+    fi
+}
+update_nss_pbuf_performance
 
 # ==================== 禁用 ath11k NSS Wi-Fi 卸载 ====================
 green "==== 禁用 ath11k NSS Wi-Fi 卸载 ===="

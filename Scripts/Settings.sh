@@ -98,13 +98,37 @@ chmod +x "$UCI_DIR/93-wifi-config"
 
 green "✅ uci-defaults 完成"
 
-# ==================== 3. NSS PBUF 性能调度优化 ====================
-update_nss_pbuf_performance() {
-    local conf="$BUILD_DIR/package/kernel/mac80211/files/pbuf.uci"
-    sed -i "s/auto_scale '1'/auto_scale 'off'/g; s/scaling_governor 'performance'/scaling_governor 'schedutil'/g" "$conf" 2>/dev/null || true
-    green "NSS PBUF: 自动缩放关闭，CPU调度器切换 schedutil"
-}
+# ===== CPU调速器统一schedutil（按需调频） =====
+ for cpu in /sys/devices/system/cpu/cpu[0-9]*; do
+      if [ -f "$cpu/cpufreq/scaling_available_governors" ] && \
+               grep -q "schedutil" "$cpu/cpufreq/scaling_available_governors" 2>/dev/null; then
+                echo "schedutil" > "$cpu/cpufreq/scaling_governor" 2>/dev/null
+     else
+                echo "ondemand" > "$cpu/cpufreq/scaling_governor" 2>/dev/null
+       fi
+ done
 
+# ==================== 禁用 ath11k NSS Wi-Fi 卸载 ====================
+green "==== 禁用 ath11k NSS Wi-Fi 卸载 ===="
+
+# 方法 1：模块参数（最可靠，modprobe 加载时生效）
+mkdir -p "./package/base-files/files/etc/modules.d"
+cat > "./package/base-files/files/etc/modules.d/ath11k" << 'ATHEOF'
+ath11k
+options ath11k nss_offload=0
+ATHEOF
+green "✅ /etc/modules.d/ath11k 已写入"
+
+
+cat > "$UCI_DIR/97-nss-wifi-off" << 'NSSOFFEOF'
+#!/bin/sh
+[ -f /sys/module/ath11k/parameters/nss_offload ] && \
+    echo 0 > /sys/module/ath11k/parameters/nss_offload 2>/dev/null
+exit 0
+NSSOFFEOF
+chmod +x "$UCI_DIR/97-nss-wifi-off"
+green "✅ uci-defaults 兜底已写入"
+		
 #高通平台调整
 DTS_PATH="./target/linux/qualcommax/dts/"
 if [[ "${WRT_TARGET^^}" == *"QUALCOMMAX"* ]]; then

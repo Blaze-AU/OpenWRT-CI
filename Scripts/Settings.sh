@@ -117,26 +117,7 @@ update_nss_pbuf_performance() {
 }
 update_nss_pbuf_performance
 
-# ==================== 禁用 ath11k NSS Wi-Fi 卸载 ====================
-green "==== 禁用 ath11k NSS Wi-Fi 卸载 ===="
 
-# 方法 1：模块参数（最可靠，modprobe 加载时生效）
-mkdir -p "./package/base-files/files/etc/modules.d"
-cat > "./package/base-files/files/etc/modules.d/ath11k" << 'ATHEOF'
-ath11k
-options ath11k nss_offload=0
-ATHEOF
-green "✅ /etc/modules.d/ath11k 已写入"
-
-
-cat > "$UCI_DIR/97-nss-wifi-off" << 'NSSOFFEOF'
-#!/bin/sh
-[ -f /sys/module/ath11k/parameters/nss_offload ] && \
-    echo 0 > /sys/module/ath11k/parameters/nss_offload 2>/dev/null
-exit 0
-NSSOFFEOF
-chmod +x "$UCI_DIR/97-nss-wifi-off"
-green "✅ uci-defaults 兜底已写入"
 		
 #高通平台调整
 DTS_PATH="./target/linux/qualcommax/dts/"

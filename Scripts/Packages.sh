@@ -7,8 +7,21 @@ set -Eeuo pipefail
 # 一、全局变量
 # ============================================================
 WORKSPACE="${GITHUB_WORKSPACE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-DEVICE_CONFIG_FILE="${1:-${CONFIG_FILE:-}}"
-GENERAL_CONFIG_FILE="${2:-${GENERAL_CONFIG_FILE:-Config/GENERAL.txt}}"
+
+# 设备配置：优先第1参数 → CONFIG_FILE 环境变量 → 根据 WRT_CONFIG 自动推断
+if [ -n "${1:-}" ]; then
+  DEVICE_CONFIG_FILE="$1"
+elif [ -n "${CONFIG_FILE:-}" ]; then
+  DEVICE_CONFIG_FILE="$CONFIG_FILE"
+elif [ -n "${WRT_CONFIG:-}" ]; then
+  DEVICE_CONFIG_FILE="$WORKSPACE/Config/${WRT_CONFIG}.txt"
+else
+  DEVICE_CONFIG_FILE=""
+fi
+
+# 通用配置：优先第2参数 → GENERAL_CONFIG_FILE 环境变量 → 默认 Config/GENERAL.txt
+GENERAL_CONFIG_FILE="${2:-${GENERAL_CONFIG_FILE:-$WORKSPACE/Config/GENERAL.txt}}"
+
 GIT_CLONE_RETRY_COUNT="${GIT_CLONE_RETRY_COUNT:-3}"
 THIRD_PARTY_SOURCES_FILE="${THIRD_PARTY_SOURCES_FILE:-$PWD/third-party-sources.txt}"
 

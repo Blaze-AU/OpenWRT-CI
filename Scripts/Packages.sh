@@ -1,100 +1,225 @@
-#!/bin/bash
-# SPDX-License-Identifier: MIT
-# Copyright (C) 2026 VIKINGYFY
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-#安装和更新软件包
-UPDATE_PACKAGE() {
-	local PKG_NAME=$1
-	local PKG_REPO=$2
-	local PKG_BRANCH=$3
-	local PKG_SPECIAL=$4
-	local PKG_LIST=("$PKG_NAME" $5)
-	local REPO_NAME=${PKG_REPO#*/}
-	local REPO_PATH="./package/$REPO_NAME"
+WORKSPACE="${GITHUB_WORKSPACE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+DEVICE_CONFIG_FILE="${1:-${CONFIG_FILE:-}}"
+GENERAL_CONFIG_FILE="${2:-${GENERAL_CONFIG_FILE:-configs/General.config}}"
+GIT_CLONE_RETRY_COUNT="${GIT_CLONE_RETRY_COUNT:-3}"
+THIRD_PARTY_SOURCES_FILE="${THIRD_PARTY_SOURCES_FILE:-$PWD/third-party-sources.txt}"
 
-	echo " "
+case "$GIT_CLONE_RETRY_COUNT" in
+  '' | *[!0-9]* | 0)
+    echo "Error: GIT_CLONE_RETRY_COUNT must be a positive integer" >&2
+    exit 1
+    ;;
+esac
 
-	# 直接删除本地可能存在的旧包目录（精确路径）
-	for NAME in "${PKG_LIST[@]}"; do
-		for DIR in "./package/$NAME" "./feeds/luci/applications/$NAME" "./feeds/packages/$NAME"; do
-			if [ -d "$DIR" ]; then
-				rm -rf "$DIR"
-				echo "Delete directory: $DIR"
-			fi
-		done
-	done
+resolve_config_file() {
+  local config_file="$1"
 
-	# 克隆 GitHub 仓库
-	git clone --depth=1 --single-branch --branch $PKG_BRANCH "https://github.com/$PKG_REPO.git" $REPO_PATH
-
-	# 处理克隆的仓库
-	if [[ "$PKG_SPECIAL" == "pkg" ]]; then
-		find $REPO_PATH/*/ -maxdepth 3 -type d -iname "*$PKG_NAME*" -prune -exec cp -rf {} ./package \;
-		rm -rf $REPO_PATH
-	fi
+  if [ -f "$config_file" ]; then
+    printf '%s\n' "$config_file"
+  elif [ -f "$WORKSPACE/$config_file" ]; then
+    printf '%s\n' "$WORKSPACE/$config_file"
+  else
+    echo "Error: configuration file was not found: $config_file" >&2
+    return 1
+  fi
 }
 
-# 调用示例
-# UPDATE_PACKAGE "包名" "项目地址" "项目分支" "pkg，可选，从大杂烩中单独提取包名插件"
-UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
-UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"
-UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
-UPDATE_PACKAGE "fluent" "LazuliKao/luci-theme-fluent" "main"
-UPDATE_PACKAGE "footstrap" "VizzleTF/luci-theme-footstrap" "main"
-UPDATE_PACKAGE "kucat" "sirpdboy/luci-theme-kucat" "master"
-UPDATE_PACKAGE "kucat-config" "sirpdboy/luci-app-kucat-config" "master"
-UPDATE_PACKAGE "shadcn" "eamonxg/luci-theme-shadcn" "main"
-
-UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
-UPDATE_PACKAGE "luci-app-adguardhome" "kenzok8/openwrt-packages" "master"
-UPDATE_PACKAGE "luci-app-smartdns" "kenzok8/openwrt-packages" "master"
-UPDATE_PACKAGE "luci-app-upnp" "immortalwrt/luci" "master"
-
-
-#更新软件包版本
-UPDATE_VERSION() {
-	local PKG_NAME=$1
-	local PKG_MARK=${2:-false}
-	local PKG_FILES=$(find ./ ./feeds/packages/ -maxdepth 3 -type f -wholename "*/$PKG_NAME/Makefile")
-
-	if [ -z "$PKG_FILES" ]; then
-		echo "$PKG_NAME not found!"
-		return
-	fi
-
-	echo -e "\n$PKG_NAME version update has started!"
-
-	for PKG_FILE in $PKG_FILES; do
-		local PKG_REPO=$(grep -Po "PKG_SOURCE_URL:=https://.*github.com/\K[^/]+/[^/]+(?=.*)" $PKG_FILE)
-		local PKG_TAG=$(curl -sL "https://api.github.com/repos/$PKG_REPO/releases" | jq -r "map(select(.prerelease == $PKG_MARK)) | first | .tag_name")
-
-		local OLD_VER=$(grep -Po "PKG_VERSION:=\K.*" "$PKG_FILE")
-		local OLD_URL=$(grep -Po "PKG_SOURCE_URL:=\K.*" "$PKG_FILE")
-		local OLD_FILE=$(grep -Po "PKG_SOURCE:=\K.*" "$PKG_FILE")
-		local OLD_HASH=$(grep -Po "PKG_HASH:=\K.*" "$PKG_FILE")
-
-		local PKG_URL=$([[ "$OLD_URL" == *"releases"* ]] && echo "${OLD_URL%/}/$OLD_FILE" || echo "${OLD_URL%/}")
-
-		local NEW_VER=$(echo $PKG_TAG | sed -E 's/[^0-9]+/\./g; s/^\.|\.$//g')
-		local NEW_URL=$(echo $PKG_URL | sed "s/\$(PKG_VERSION)/$NEW_VER/g; s/\$(PKG_NAME)/$PKG_NAME/g")
-		local NEW_HASH=$(curl -sL "$NEW_URL" | sha256sum | cut -d ' ' -f 1)
-
-		echo "old version: $OLD_VER $OLD_HASH"
-		echo "new version: $NEW_VER $NEW_HASH"
-
-		if [[ "$NEW_VER" =~ ^[0-9].* ]] && dpkg --compare-versions "$OLD_VER" lt "$NEW_VER"; then
-			sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$NEW_VER/g" "$PKG_FILE"
-			sed -i "s/PKG_HASH:=.*/PKG_HASH:=$NEW_HASH/g" "$PKG_FILE"
-			echo "$PKG_FILE version has been updated!"
-		else
-			echo "$PKG_FILE version is already the latest!"
-		fi
-	done
-}
-#UPDATE_VERSION "软件包名" "测试版，true，可选，默认为否"
-#UPDATE_VERSION "sing-box"
-
-#引入私有扩展脚本
-if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
-	source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
+CONFIG_FILES=()
+if [ -n "$DEVICE_CONFIG_FILE" ]; then
+  CONFIG_FILES+=("$(resolve_config_file "$DEVICE_CONFIG_FILE")")
+elif [ -f .config ]; then
+  # Keep direct invocations compatible with an existing OpenWrt .config.
+  CONFIG_FILES+=("$PWD/.config")
+else
+  echo "Error: pass the device config as the first argument or CONFIG_FILE" >&2
+  exit 1
 fi
+CONFIG_FILES+=("$(resolve_config_file "$GENERAL_CONFIG_FILE")")
+
+config_symbol_enabled() {
+  local symbol="$1"
+
+  awk -v symbol="$symbol" '
+    { sub(/\r$/, "") }
+    $0 == symbol "=y" || $0 == symbol "=m" { enabled = 1; next }
+    $0 == symbol "=n" || $0 == "# " symbol " is not set" { enabled = 0 }
+    END { exit(enabled ? 0 : 1) }
+  ' "${CONFIG_FILES[@]}"
+}
+
+target_device_package_enabled() {
+  local package_name="$1"
+
+  awk -v package_name="$package_name" '
+    { sub(/\r$/, "") }
+    /^CONFIG_TARGET_DEVICE_PACKAGES_[^=]+="/ {
+      packages = $0
+      sub(/^[^"]*"/, "", packages)
+      sub(/"$/, "", packages)
+      count = split(packages, values, /[[:space:]]+/)
+      for (i = 1; i <= count; i++) {
+        if (values[i] == package_name) {
+          found = 1
+        }
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "${CONFIG_FILES[@]}"
+}
+
+package_enabled() {
+  local package_name
+
+  for package_name in "$@"; do
+    if config_symbol_enabled "CONFIG_PACKAGE_$package_name" || target_device_package_enabled "$package_name"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+clone_with_retry() {
+  local target_dir="$1"
+  local attempt
+  shift
+
+  for ((attempt = 1; attempt <= GIT_CLONE_RETRY_COUNT; attempt++)); do
+    rm -rf "$target_dir"
+    if git clone "$@" "$target_dir"; then
+      return 0
+    fi
+
+    if [ "$attempt" -lt "$GIT_CLONE_RETRY_COUNT" ]; then
+      echo "Git clone failed; retrying ($((attempt + 1))/$GIT_CLONE_RETRY_COUNT): ${*: -1}" >&2
+      sleep $((attempt * 2))
+    fi
+  done
+
+  echo "Error: git clone failed after $GIT_CLONE_RETRY_COUNT attempts: ${*: -1}" >&2
+  return 1
+}
+
+record_git_revision() {
+  local repo_url="$1"
+  local branch="$2"
+  local checkout_dir="$3"
+  local commit
+  local revision
+
+  commit="$(git -C "$checkout_dir" rev-parse HEAD)"
+  printf -v revision '%s\t%s\t%s' "$repo_url" "$branch" "$commit"
+  grep -Fqx -- "$revision" "$THIRD_PARTY_SOURCES_FILE" || printf '%s\n' "$revision" >> "$THIRD_PARTY_SOURCES_FILE"
+}
+
+clone_repository() {
+  local repo_url="$1"
+  local branch="$2"
+  local target_dir="$3"
+
+  clone_with_retry "$target_dir" \
+    --depth=1 \
+    --no-tags \
+    --branch "$branch" \
+    --single-branch \
+    "$repo_url"
+  record_git_revision "$repo_url" "$branch" "$target_dir"
+}
+
+mkdir -p "$(dirname "$THIRD_PARTY_SOURCES_FILE")"
+printf 'Repository\tBranch\tCommit\n' > "$THIRD_PARTY_SOURCES_FILE"
+	echo " "
+# Git稀疏克隆，只克隆指定目录到本地
+git_sparse_clone() {
+  local branch="$1"
+  local repourl="$2"
+  local repodir
+  local sparse_path
+  shift 2
+
+  repodir="$(basename "${repourl%.git}")"
+  clone_with_retry "$repodir" \
+    --depth=1 \
+    --no-tags \
+    --branch "$branch" \
+    --single-branch \
+    --filter=blob:none \
+    --sparse \
+    "$repourl"
+  (
+    cd "$repodir"
+    git sparse-checkout set "$@"
+  )
+  record_git_revision "$repourl" "$branch" "$repodir"
+
+  for sparse_path in "$@"; do
+    rm -rf "package/$(basename "$sparse_path")"
+    mv "$repodir/$sparse_path" package/
+  done
+  rm -rf "$repodir"
+}
+
+
+if package_enabled luci-app-upnp miniupnpd; then
+  rm -rf feeds/packages/net/miniupnpd
+  git_sparse_clone master https://github.com/immortalwrt/packages net/miniupnpd
+  mv package/miniupnpd feeds/packages/net/miniupnpd
+fi
+if package_enabled luci-app-upnp; then
+  rm -rf feeds/luci/applications/luci-app-upnp
+  git_sparse_clone master https://github.com/immortalwrt/luci applications/luci-app-upnp
+  mv package/luci-app-upnp feeds/luci/applications/luci-app-upnp
+fi
+
+if package_enabled luci-app-wol; then
+  rm -rf feeds/luci/applications/luci-app-wol
+  git_sparse_clone master https://github.com/immortalwrt/luci applications/luci-app-wol
+  mv package/luci-app-wol feeds/luci/applications/luci-app-wol
+fi
+
+# Themes and standalone applications. A config application pulls in its theme as a dependency.
+if package_enabled luci-theme-argon luci-app-argon-config; then
+  rm -rf feeds/luci/themes/luci-theme-argon
+  clone_repository https://github.com/jerrykuku/luci-theme-argon master feeds/luci/themes/luci-theme-argon
+fi
+if package_enabled luci-app-argon-config; then
+  rm -rf feeds/luci/applications/luci-app-argon-config
+  clone_repository https://github.com/jerrykuku/luci-app-argon-config master feeds/luci/applications/luci-app-argon-config
+fi
+
+if package_enabled luci-theme-aurora luci-app-aurora-config; then
+  rm -rf feeds/luci/themes/luci-theme-aurora
+  clone_repository https://github.com/eamonxg/luci-theme-aurora master feeds/luci/themes/luci-theme-aurora
+fi
+if package_enabled luci-app-aurora-config; then
+  rm -rf feeds/luci/applications/luci-app-aurora-config
+  clone_repository https://github.com/eamonxg/luci-app-aurora-config master feeds/luci/applications/luci-app-aurora-config
+fi
+
+if package_enabled luci-app-wechatpush; then
+  rm -rf feeds/luci/applications/luci-app-wechatpush
+  clone_repository https://github.com/tty228/luci-app-wechatpush master package/luci-app-wechatpush
+fi
+
+
+if package_enabled luci-app-adguardhome; then
+  rm -rf feeds/luci/applications/luci-app-adguardhome
+  git_sparse_clone master https://github.com/kenzok8/openwrt-packages luci-app-adguardhome
+  mv package/luci-app-adguardhome feeds/luci/applications/luci-app-adguardhome
+fi
+if package_enabled luci-app-smartdns; then
+  rm -rf feeds/luci/applications/luci-app-smartdns
+  git_sparse_clone master https://github.com/kenzok8/openwrt-packages luci-app-smartdns
+  mv package/luci-app-smartdns feeds/luci/applications/luci-app-smartdns
+fi
+
+
+
+
+
+
+
+

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 VIKINGYFY
 set -Eeuo pipefail
 
+# ============================================================
+# 一、全局变量
+# ============================================================
 WORKSPACE="${GITHUB_WORKSPACE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DEVICE_CONFIG_FILE="${1:-${CONFIG_FILE:-}}"
 GENERAL_CONFIG_FILE="${2:-${GENERAL_CONFIG_FILE:-Config/GENERAL.txt}}"
@@ -14,6 +19,11 @@ case "$GIT_CLONE_RETRY_COUNT" in
     ;;
 esac
 
+green() { echo -e "\033[32m$*\033[0m"; }
+
+# ============================================================
+# 二、配置文件解析
+# ============================================================
 resolve_config_file() {
   local config_file="$1"
 
@@ -31,7 +41,6 @@ CONFIG_FILES=()
 if [ -n "$DEVICE_CONFIG_FILE" ]; then
   CONFIG_FILES+=("$(resolve_config_file "$DEVICE_CONFIG_FILE")")
 elif [ -f .config ]; then
-  # Keep direct invocations compatible with an existing OpenWrt .config.
   CONFIG_FILES+=("$PWD/.config")
 else
   echo "Error: pass the device config as the first argument or CONFIG_FILE" >&2
@@ -39,6 +48,9 @@ else
 fi
 CONFIG_FILES+=("$(resolve_config_file "$GENERAL_CONFIG_FILE")")
 
+# ============================================================
+# 三、判断某个包是否在配置中启用
+# ============================================================
 config_symbol_enabled() {
   local symbol="$1"
 
@@ -82,6 +94,9 @@ package_enabled() {
   return 1
 }
 
+# ============================================================
+# 四、克隆工具（重试 + 版本记录 + 稀疏克隆）
+# ============================================================
 clone_with_retry() {
   local target_dir="$1"
   local attempt
@@ -129,10 +144,7 @@ clone_repository() {
   record_git_revision "$repo_url" "$branch" "$target_dir"
 }
 
-mkdir -p "$(dirname "$THIRD_PARTY_SOURCES_FILE")"
-printf 'Repository\tBranch\tCommit\n' > "$THIRD_PARTY_SOURCES_FILE"
-	echo " "
-# Git稀疏克隆，只克隆指定目录到本地
+# Git 稀疏克隆，只克隆指定目录到本地
 git_sparse_clone() {
   local branch="$1"
   local repourl="$2"
@@ -162,7 +174,18 @@ git_sparse_clone() {
   rm -rf "$repodir"
 }
 
+# ============================================================
+# 五、初始化第三方源版本记录文件
+# ============================================================
+mkdir -p "$(dirname "$THIRD_PARTY_SOURCES_FILE")"
+printf 'Repository\tBranch\tCommit\n' > "$THIRD_PARTY_SOURCES_FILE"
 
+# ============================================================
+# 六、按需拉取第三方包（只拉配置里启用的）
+# ============================================================
+green "==== 按需拉取第三方包 ===="
+
+# ---- UPNP（含 miniupnpd 依赖）----
 if package_enabled luci-app-upnp miniupnpd; then
   rm -rf feeds/packages/net/miniupnpd
   git_sparse_clone master https://github.com/immortalwrt/packages net/miniupnpd
@@ -174,13 +197,14 @@ if package_enabled luci-app-upnp; then
   mv package/luci-app-upnp feeds/luci/applications/luci-app-upnp
 fi
 
+# ---- WOL ----
 if package_enabled luci-app-wol; then
   rm -rf feeds/luci/applications/luci-app-wol
   git_sparse_clone master https://github.com/immortalwrt/luci applications/luci-app-wol
   mv package/luci-app-wol feeds/luci/applications/luci-app-wol
 fi
 
-# Themes and standalone applications. A config application pulls in its theme as a dependency.
+# ---- Argon 主题 + 配置 ----
 if package_enabled luci-theme-argon luci-app-argon-config; then
   rm -rf feeds/luci/themes/luci-theme-argon
   clone_repository https://github.com/jerrykuku/luci-theme-argon master feeds/luci/themes/luci-theme-argon
@@ -190,6 +214,7 @@ if package_enabled luci-app-argon-config; then
   clone_repository https://github.com/jerrykuku/luci-app-argon-config master feeds/luci/applications/luci-app-argon-config
 fi
 
+# ---- Aurora 主题 + 配置 ----
 if package_enabled luci-theme-aurora luci-app-aurora-config; then
   rm -rf feeds/luci/themes/luci-theme-aurora
   clone_repository https://github.com/eamonxg/luci-theme-aurora master feeds/luci/themes/luci-theme-aurora
@@ -199,27 +224,28 @@ if package_enabled luci-app-aurora-config; then
   clone_repository https://github.com/eamonxg/luci-app-aurora-config master feeds/luci/applications/luci-app-aurora-config
 fi
 
+# ---- 微信推送 ----
 if package_enabled luci-app-wechatpush; then
   rm -rf feeds/luci/applications/luci-app-wechatpush
   clone_repository https://github.com/tty228/luci-app-wechatpush master package/luci-app-wechatpush
 fi
 
-
+# ---- AdGuard Home ----
 if package_enabled luci-app-adguardhome; then
   rm -rf feeds/luci/applications/luci-app-adguardhome
   git_sparse_clone master https://github.com/kenzok8/openwrt-packages luci-app-adguardhome
   mv package/luci-app-adguardhome feeds/luci/applications/luci-app-adguardhome
 fi
+
+# ---- SmartDNS ----
 if package_enabled luci-app-smartdns; then
   rm -rf feeds/luci/applications/luci-app-smartdns
   git_sparse_clone master https://github.com/kenzok8/openwrt-packages luci-app-smartdns
   mv package/luci-app-smartdns feeds/luci/applications/luci-app-smartdns
 fi
 
-
-
-
-
-
-
-
+# ============================================================
+# 七、完成
+# ============================================================
+green "==== 第三方包拉取完成 ===="
+green "版本记录：$THIRD_PARTY_SOURCES_FILE"

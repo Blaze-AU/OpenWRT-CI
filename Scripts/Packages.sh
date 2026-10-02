@@ -44,18 +44,11 @@ UPDATE_PACKAGE() {
 # 调用示例
 # UPDATE_PACKAGE "OpenAppFilter" "destan19/OpenAppFilter" "master" "" "custom_name1 custom_name2"
 # UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf" 这样会把原有的open-app-filter，luci-app-appfilter，oaf相关组件删除，不会出现coremark错误。
-# ---- AdGuard Home ----
-if package_enabled luci-app-adguardhome; then
-  rm -rf feeds/luci/applications/luci-app-adguardhome
-  git_sparse_clone master https://github.com/kenzok8/openwrt-packages luci-app-adguardhome
-  mv package/luci-app-adguardhome feeds/luci/applications/luci-app-adguardhome
-fi
-# ---- SmartDNS ----
-if package_enabled luci-app-smartdns; then
-  rm -rf feeds/luci/applications/luci-app-smartdns
-  git_sparse_clone master https://github.com/kenzok8/openwrt-packages luci-app-smartdns
-  mv package/luci-app-smartdns feeds/luci/applications/luci-app-smartdns
-fi
+
+UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
+UPDATE_PACKAGE "luci-app-adguardhome" "kenzok8/openwrt-packages" "master" "name" "luci-app-adguardhome" "adguardhome"
+UPDATE_PACKAGE "luci-app-smartdns" "kenzok8/openwrt-packages" "master"
+UPDATE_PACKAGE "luci-app-upnp" "immortalwrt/luci" "master"
 
 # UPDATE_PACKAGE "包名" "项目地址" "项目分支" "pkg，可选，从大杂烩中单独提取包名插件"
 UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"

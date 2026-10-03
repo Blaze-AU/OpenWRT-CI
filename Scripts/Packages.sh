@@ -46,7 +46,7 @@ UPDATE_PACKAGE() {
 # UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf" 这样会把原有的open-app-filter，luci-app-appfilter，oaf相关组件删除，不会出现coremark错误。
 
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
-UPDATE_PACKAGE "luci-app-adguardhome" "kenzok8/openwrt-packages" "master" "name" "luci-app-adguardhome" "adguardhome"
+UPDATE_PACKAGE "luci-app-adguardhome" "kenzok8/openwrt-packages" "master"  "luci-app-adguardhome adguardhome"
 UPDATE_PACKAGE "luci-app-smartdns" "kenzok8/openwrt-packages" "master"
 UPDATE_PACKAGE "luci-app-upnp" "immortalwrt/luci" "master"
 

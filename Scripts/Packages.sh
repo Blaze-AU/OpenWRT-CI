@@ -16,39 +16,23 @@ UPDATE_PACKAGE() {
 
 	# 删除本地可能存在的不同名称的软件包
 	for NAME in "${PKG_LIST[@]}"; do
+		# 查找匹配的目录
 		echo "Search directory: $NAME"
 		local FOUND_DIRS=$(find ./feeds/luci/ ./feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
 
+		# 删除找到的目录
 		if [ -n "$FOUND_DIRS" ]; then
 			while read -r DIR; do
 				rm -rf "$DIR"
 				echo "Delete directory: $DIR"
 			done <<< "$FOUND_DIRS"
 		else
-			echo "Not found directory: $NAME"
+			echo "Not fonud directory: $NAME"
 		fi
 	done
 
-	# 强制删除旧目录，避免 clone 因目录已存在而失败
-	rm -rf "$REPO_PATH"
-
-	# 克隆 GitHub 仓库（失败自动重试 3 次）
-	local RETRY=3
-	while [ $RETRY -gt 0 ]; do
-		if git clone --depth=1 --single-branch --branch "$PKG_BRANCH" \
-			"https://github.com/$PKG_REPO.git" "$REPO_PATH"; then
-			break
-		fi
-		echo "Clone failed, retrying... ($RETRY left)"
-		rm -rf "$REPO_PATH"
-		RETRY=$((RETRY-1))
-		sleep 3
-	done
-
-	if [ ! -d "$REPO_PATH/.git" ]; then
-		echo "ERROR: clone $PKG_REPO failed!"
-		return 1
-	fi
+	# 克隆 GitHub 仓库
+	git clone --depth=1 --single-branch --branch $PKG_BRANCH "https://github.com/$PKG_REPO.git" $REPO_PATH
 
 	# 处理克隆的仓库
 	if [[ "$PKG_SPECIAL" == "pkg" ]]; then
@@ -59,7 +43,7 @@ UPDATE_PACKAGE() {
 
 # 调用示例
 # UPDATE_PACKAGE "OpenAppFilter" "destan19/OpenAppFilter" "master" "" "custom_name1 custom_name2"
-# UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf"
+# UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf" 这样会把原有的open-app-filter，luci-app-appfilter，oaf相关组件删除，不会出现coremark错误。
 
 UPDATE_PACKAGE "luci-app-rtp2httpd" "stackia/rtp2httpd" "main" "name" "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "kenzok8/openwrt-packages" "master" "pkg"
@@ -113,11 +97,11 @@ UPDATE_PACKAGE "mt5700m" "LianXia233/luci-app-mt5700m" "main"
 UPDATE_PACKAGE "netmonitor" "LianXia233/luci-app-netmonitor" "main"
 UPDATE_PACKAGE "qmodem-generic" "LianXia233/luci-app-qmodem-generic" "main"
 
-#更新软件包版本（支持强制更新，保留 v1.21 风格版本号）
+#更新软件包版本
 UPDATE_VERSION() {
 	local PKG_NAME=$1
-	local PKG_MARK=${2:-false}    # 是否取 prerelease，默认 false
-	local PKG_FORCE=${3:-false}   # 是否强制更新，默认 false
+	local PKG_MARK=${2:-false}       # 是否取 prerelease
+	local PKG_FORCE=${3:-false}      # 是否强制更新（即使版本未升高）
 	local PKG_FILES=$(find ./ ./feeds/packages/ -maxdepth 3 -type f -wholename "*/$PKG_NAME/Makefile")
 
 	if [ -z "$PKG_FILES" ]; then
@@ -138,12 +122,14 @@ UPDATE_VERSION() {
 
 		local PKG_URL=$([[ "$OLD_URL" == *"releases"* ]] && echo "${OLD_URL%/}/$OLD_FILE" || echo "${OLD_URL%/}")
 
-		# 保留 v 前缀的完整 tag（用于 URL 拼接），如 v1.21
+		# ===== 关键：保留 v 前缀 tag，同时生成纯数字 PKG_VERSION =====
+		# PKG_VER_TAG -> 原始 tag（含 v），如 v1.21
+		# NEW_VER     -> 去掉 v 的纯数字，如 1.21（供 PKG_VERSION 使用）
 		local PKG_VER_TAG="$PKG_TAG"
-		# 去掉 v 前缀的纯数字版本（用于 PKG_VERSION，OpenWrt 不允许字母开头），如 1.21
 		local NEW_VER=$(echo "$PKG_TAG" | sed -E 's/^[vV]//; s/[^0-9]+/\./g; s/^\.|\.$//g')
+		# ===========================================================
 
-		# URL 里同时支持 $(PKG_VERSION)（纯数字）和 $(PKG_TAG)（带 v）
+		# URL 拼接：同时支持 $(PKG_VERSION)（纯数字）和 $(PKG_TAG)（带 v）
 		local NEW_URL=$(echo $PKG_URL | \
 			sed "s/\$(PKG_VERSION)/$NEW_VER/g; s/\$(PKG_TAG)/$PKG_VER_TAG/g; s/\$(PKG_NAME)/$PKG_NAME/g")
 		local NEW_HASH=$(curl -sL "$NEW_URL" | sha256sum | cut -d ' ' -f 1)
@@ -151,7 +137,6 @@ UPDATE_VERSION() {
 		echo "old version: $OLD_VER $OLD_HASH"
 		echo "new version: $NEW_VER (tag: $PKG_VER_TAG) $NEW_HASH"
 
-		# 强制更新：PKG_FORCE=true 时，只要新版本号有效就更新
 		if [[ "$NEW_VER" =~ ^[0-9].* ]] && \
 		   { [ "$PKG_FORCE" == "true" ] || dpkg --compare-versions "$OLD_VER" lt "$NEW_VER"; }; then
 			sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$NEW_VER/g" "$PKG_FILE"
@@ -163,14 +148,14 @@ UPDATE_VERSION() {
 	done
 }
 
-# 用法：
-# UPDATE_VERSION "软件包名"                      # 普通更新（仅版本升高时）
-# UPDATE_VERSION "软件包名" "false" "true"        # 强制更新到最新 release（如 v1.21）
-# UPDATE_VERSION "软件包名" "true"  "true"        # 强制更新到最新 prerelease
-
-# 示例（按需启用）：
-# UPDATE_VERSION "sing-box"
-# UPDATE_VERSION "sing-box" "false" "true"
+# ============================================================
+# 调用示例：
+#   UPDATE_VERSION "sing-box"                     # 普通更新（仅版本升高时）
+#   UPDATE_VERSION "sing-box" "false" "true"      # 强制更新到最新 release（如 v1.21）
+#   UPDATE_VERSION "sing-box" "true"  "true"      # 强制更新到最新 prerelease
+# ============================================================
+#UPDATE_VERSION "sing-box" "false" "true"
+#UPDATE_VERSION "mosdns"   "false" "true"
 
 #引入私有扩展脚本
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then

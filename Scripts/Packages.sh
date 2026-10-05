@@ -16,11 +16,9 @@ UPDATE_PACKAGE() {
 
 	# 删除本地可能存在的不同名称的软件包
 	for NAME in "${PKG_LIST[@]}"; do
-		# 查找匹配的目录
 		echo "Search directory: $NAME"
 		local FOUND_DIRS=$(find ./feeds/luci/ ./feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
 
-		# 删除找到的目录
 		if [ -n "$FOUND_DIRS" ]; then
 			while read -r DIR; do
 				rm -rf "$DIR"
@@ -97,11 +95,11 @@ UPDATE_PACKAGE "mt5700m" "LianXia233/luci-app-mt5700m" "main"
 UPDATE_PACKAGE "netmonitor" "LianXia233/luci-app-netmonitor" "main"
 UPDATE_PACKAGE "qmodem-generic" "LianXia233/luci-app-qmodem-generic" "main"
 
-#更新软件包版本
-UPDATE_VERSION() {
+# ============================================================
+# 更新软件包 HASH（不改版本号）
+# ============================================================
+UPDATE_HASH() {
 	local PKG_NAME=$1
-	local PKG_MARK=${2:-false}       # 是否取 prerelease
-	local PKG_FORCE=${3:-false}      # 是否强制更新（即使版本未升高）
 	local PKG_FILES=$(find ./ ./feeds/packages/ -maxdepth 3 -type f -wholename "*/$PKG_NAME/Makefile")
 
 	if [ -z "$PKG_FILES" ]; then
@@ -109,53 +107,48 @@ UPDATE_VERSION() {
 		return
 	fi
 
-	echo -e "\n$PKG_NAME version update has started!"
+	echo -e "\n$PKG_NAME hash update has started!"
 
 	for PKG_FILE in $PKG_FILES; do
-		local PKG_REPO=$(grep -Po "PKG_SOURCE_URL:=https://.*github.com/\K[^/]+/[^/]+(?=.*)" $PKG_FILE)
-		local PKG_TAG=$(curl -sL "https://api.github.com/repos/$PKG_REPO/releases" | jq -r "map(select(.prerelease == $PKG_MARK)) | first | .tag_name")
-
 		local OLD_VER=$(grep -Po "PKG_VERSION:=\K.*" "$PKG_FILE")
 		local OLD_URL=$(grep -Po "PKG_SOURCE_URL:=\K.*" "$PKG_FILE")
 		local OLD_FILE=$(grep -Po "PKG_SOURCE:=\K.*" "$PKG_FILE")
 		local OLD_HASH=$(grep -Po "PKG_HASH:=\K.*" "$PKG_FILE")
 
+		# 拼接下载 URL（不改变版本号，直接用原 PKG_VERSION / PKG_NAME）
 		local PKG_URL=$([[ "$OLD_URL" == *"releases"* ]] && echo "${OLD_URL%/}/$OLD_FILE" || echo "${OLD_URL%/}")
+		local NEW_URL=$(echo "$PKG_URL" | sed "s/\$(PKG_VERSION)/$OLD_VER/g; s/\$(PKG_NAME)/$PKG_NAME/g")
 
-		# ===== 关键：保留 v 前缀 tag，同时生成纯数字 PKG_VERSION =====
-		# PKG_VER_TAG -> 原始 tag（含 v），如 v1.21
-		# NEW_VER     -> 去掉 v 的纯数字，如 1.21（供 PKG_VERSION 使用）
-		local PKG_VER_TAG="$PKG_TAG"
-		local NEW_VER=$(echo "$PKG_TAG" | sed -E 's/^[vV]//; s/[^0-9]+/\./g; s/^\.|\.$//g')
-		# ===========================================================
+		echo "  version : $OLD_VER"
+		echo "  url     : $NEW_URL"
 
-		# URL 拼接：同时支持 $(PKG_VERSION)（纯数字）和 $(PKG_TAG)（带 v）
-		local NEW_URL=$(echo $PKG_URL | \
-			sed "s/\$(PKG_VERSION)/$NEW_VER/g; s/\$(PKG_TAG)/$PKG_VER_TAG/g; s/\$(PKG_NAME)/$PKG_NAME/g")
 		local NEW_HASH=$(curl -sL "$NEW_URL" | sha256sum | cut -d ' ' -f 1)
 
-		echo "old version: $OLD_VER $OLD_HASH"
-		echo "new version: $NEW_VER (tag: $PKG_VER_TAG) $NEW_HASH"
+		echo "  old hash: $OLD_HASH"
+		echo "  new hash: $NEW_HASH"
 
-		if [[ "$NEW_VER" =~ ^[0-9].* ]] && \
-		   { [ "$PKG_FORCE" == "true" ] || dpkg --compare-versions "$OLD_VER" lt "$NEW_VER"; }; then
-			sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$NEW_VER/g" "$PKG_FILE"
+		if [ -z "$NEW_HASH" ] || [ "$NEW_HASH" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+			# e3b0c442... 是空文件的 sha256，说明下载失败
+			echo "  SKIP: download failed or empty file!"
+			continue
+		fi
+
+		if [ "$OLD_HASH" != "$NEW_HASH" ]; then
 			sed -i "s/PKG_HASH:=.*/PKG_HASH:=$NEW_HASH/g" "$PKG_FILE"
-			echo "$PKG_FILE version has been updated!"
+			echo "  hash updated!"
 		else
-			echo "$PKG_FILE version is already the latest!"
+			echo "  hash unchanged."
 		fi
 	done
 }
 
 # ============================================================
-# 调用示例：
-#   UPDATE_VERSION "sing-box"                     # 普通更新（仅版本升高时）
-#   UPDATE_VERSION "sing-box" "false" "true"      # 强制更新到最新 release（如 v1.21）
-#   UPDATE_VERSION "sing-box" "true"  "true"      # 强制更新到最新 prerelease
+# 调用示例（不改版本号，只重算 hash）
+#   UPDATE_HASH "sing-box"
+#   UPDATE_HASH "mosdns"
 # ============================================================
-#UPDATE_VERSION "sing-box" "false" "true"
-#UPDATE_VERSION "mosdns"   "false" "true"
+#UPDATE_HASH "sing-box"
+#UPDATE_HASH "mosdns"
 
 #引入私有扩展脚本
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then

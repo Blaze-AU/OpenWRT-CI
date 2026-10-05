@@ -52,12 +52,6 @@ UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev
 # smartdns：LuCI 界面 + 主程序需要分开拉取
 # luci-app-smartdns 来自 pymumu/luci-app-smartdns，根目录即插件[citation:14]
 UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master"
-# smartdns 主程序来自 pymumu/openwrt-smartdns[citation:8]
-UPDATE_PACKAGE "smartdns" "pymumu/openwrt-smartdns" "master"
-
-# luci-app-upnp：不推荐直接用 UPDATE_PACKAGE 拉 immortalwrt/luci
-# 因为它是整个 luci 大仓库，会导致重复包冲突[citation:23]
-# 建议改用 feeds 安装（见下方说明），或使用 git_sparse_clone
 
 # ============================================================
 # 更新软件包 HASH（不改版本号）

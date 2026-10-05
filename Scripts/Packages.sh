@@ -51,7 +51,7 @@ UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev
 
 # smartdns：LuCI 界面 + 主程序需要分开拉取
 # luci-app-smartdns 来自 pymumu/luci-app-smartdns，根目录即插件[citation:14]
-UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master"
+#UPDATE_PACKAGE "luci-app-smartdns" "pymumu/luci-app-smartdns" "master"
 
 # ============================================================
 # 更新软件包 HASH（不改版本号）

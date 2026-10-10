@@ -205,15 +205,19 @@ touch "./package/base-files/files/etc/smartdns/domain-set/cn.conf"
 touch "./package/base-files/files/etc/smartdns/domain-set/oversea.conf"
 touch "./package/base-files/files/etc/smartdns/domain-set/anti-ad-smartdns.conf"
 
-# ---------- custom.conf ----------
-mkdir -p "./package/base-files/files/etc/smartdns"
-cat > "./package/base-files/files/etc/smartdns/custom.conf" << 'CUSTOMEOF'
+# ---------- custom.conf (改为 uci-defaults 动态生成) ----------
+cat > "$UCI_DIR/95-smartdns-custom" << 'CUSTOMEOF'
+#!/bin/sh
+cat > /etc/smartdns/custom.conf << 'EOF'
 # Add custom settings here.
 # please read https://pymumu.github.io/smartdns/config/basic-config/
 
 # anti-AD 去广告规则
 conf-file /etc/smartdns/domain-set/anti-ad-smartdns.conf
+EOF
+exit 0
 CUSTOMEOF
+chmod +x "$UCI_DIR/95-smartdns-custom"
 
 # ---------- 定时任务 ----------
 mkdir -p "./package/base-files/files/etc/crontabs"

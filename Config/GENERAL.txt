@@ -21,6 +21,9 @@ CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
 
 #NSS Wi-Fi 卸载
 CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=n
+CONFIG_PACKAGE_wpad=n
+CONFIG_PACKAGE_hostapd=y
+CONFIG_PACKAGE_hostapd-utils=y
 
 #NSS 功能扩展
 CONFIG_NSS_DRV_IGS_ENABLE=y
@@ -63,13 +66,11 @@ CONFIG_PACKAGE_ppp-mod-pppoe=y
 CONFIG_PACKAGE_luci-proto-ppp=y
 
 #DNS 与广告拦截
-CONFIG_PACKAGE_smartdns=y
 CONFIG_PACKAGE_luci-app-smartdns=y
 # AdGuardHome
-CONFIG_PACKAGE_luci-app-adguardhome=y
+#CONFIG_PACKAGE_luci-app-adguardhome=y
 
 #组播转单播（IPTV）
-CONFIG_PACKAGE_rtp2httpd=y
 CONFIG_PACKAGE_luci-app-rtp2httpd=y
 
 #端口映射 / 组网
@@ -139,7 +140,6 @@ CONFIG_PACKAGE_kmod-udptunnel4=n
 CONFIG_PACKAGE_kmod-udptunnel6=n
 CONFIG_PACKAGE_kmod-6rd=n
 
-CONFIG_SHORTCUT_FE=n
 
 #禁用 SQM
 CONFIG_PACKAGE_sqm-scripts=n

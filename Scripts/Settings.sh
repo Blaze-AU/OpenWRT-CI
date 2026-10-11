@@ -38,10 +38,17 @@ echo "CONFIG_PACKAGE_luci-theme-$WRT_THEME=y" >> ./.config
 echo "CONFIG_PACKAGE_luci-app-$WRT_THEME-config=y" >> ./.config
 
 
-# 引入私有扩展配置
-if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
-	echo "Applying private configurations from PRIVATE.txt..."
-	cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
+# ===================== 3. 私有配置 =====================
+green "=== 3. 加载自定义配置 ==="
+if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -f "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" ]; then
+    green "📂 加载私有配置"
+    cat "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" >> "$CONFIG_FILE"
+fi
+if [ -n "$WRT_PACKAGE" ]; then
+    green "📦 添加自定义插件"
+    printf '%s\n' "$WRT_PACKAGE" | while IFS= read -r line; do
+        [ -n "$line" ] && echo "$line" >> "$CONFIG_FILE"
+    done
 fi
 
 # ==================== uci-defaults 预设 ====================

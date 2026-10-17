@@ -93,13 +93,15 @@ exit 0
 WIFIEOF
 chmod +x "$UCI_DIR/93-wifi-config"
 
-# ---------- SmartDNS ----------
+# ---------- SmartDNS 移动宽带专用（最终版） ----------
 cat > "$UCI_DIR/94-smartdns" << 'SMARTDNSEOF'
 #!/bin/sh
-
 [ -f /etc/config/smartdns ] || touch /etc/config/smartdns
+# 确保日志目录和域名列表目录存在
+mkdir -p /var/log/smartdns
+mkdir -p /etc/smartdns/domain-set
 
-# 主配置
+# ========== 1. 主配置 ==========
 uci -q batch <<-EOT
     set smartdns.@smartdns[0].enabled='1'
     set smartdns.@smartdns[0].port='6053'
@@ -115,125 +117,109 @@ uci -q batch <<-EOT
     set smartdns.@smartdns[0].resolve_local_hostnames='1'
     set smartdns.@smartdns[0].force_https_soa='1'
     set smartdns.@smartdns[0].rr_ttl_min='600'
-    set smartdns.@smartdns[0].seconddns_port='6553'
-    set smartdns.@smartdns[0].seconddns_tcp_server='1'
+    # 不需要第二DNS，注释关闭
+    # set smartdns.@smartdns[0].seconddns_port='6553'
+    # set smartdns.@smartdns[0].seconddns_tcp_server='1'
     set smartdns.@smartdns[0].log_output_mode='file'
     set smartdns.@smartdns[0].prefetch_domain='1'
     set smartdns.@smartdns[0].cache_size='32768'
     set smartdns.@smartdns[0].server_name='cn'
-    set smartdns.@smartdns[0].coredump='1'
+    set smartdns.@smartdns[0].coredump='0'
     set smartdns.@smartdns[0].log_level='info'
     set smartdns.@smartdns[0].log_size='64k'
     set smartdns.@smartdns[0].log_num='1'
     set smartdns.@smartdns[0].log_file='/var/log/smartdns/smartdns.log'
     set smartdns.@smartdns[0].enable_auto_update='0'
-    set smartdns.@smartdns[0].old_port='6053'
-    set smartdns.@smartdns[0].old_enabled='1'
-    set smartdns.@smartdns[0].old_auto_set_dnsmasq='1'
 EOT
 
-# 国内 UDP 服务器
+# ========== 2. 国内 UDP 服务器 ==========
 add_server() {
-    local name="$1" ip="$2" group="$3" extra="$4"
+    local name="$1" ip="$2" group="$3" exclude="$4"
     local sec=$(uci add smartdns server)
     uci set smartdns.$sec.enabled='1'
     uci set smartdns.$sec.name="$name"
     uci set smartdns.$sec.ip="$ip"
     uci set smartdns.$sec.type='udp'
     uci set smartdns.$sec.server_group="$group"
-    [ -n "$extra" ] && uci set smartdns.$sec.exclude_default_group="$extra"
+    [ -n "$exclude" ] && uci set smartdns.$sec.exclude_default_group="$exclude"
 }
+# 移动运营商DNS（优先，移动宽带延迟最低）
+add_server 'cmcc'    '211.136.192.6'   'cn' ''
+add_server 'cmcc2'   '120.196.165.24'  'cn' ''
+# 国内公共DNS做备份
+add_server 'ali'     '223.5.5.5'       'cn' ''
+add_server 'dnspod'  '119.29.29.29'    'cn' ''
+add_server 'baidu'   '180.76.76.76'    'cn' ''
 
-add_server 'ali'     '223.5.5.5'        'cn' ''
-add_server 'dnspod'  '119.29.29.29'     'cn' ''
-add_server 'baidu'   '180.76.76.76'     'cn' ''
-add_server '360'     '101.226.4.6'      'cn' ''
-add_server 'dnspod2' '182.254.116.116'  'cn' ''
-
-# DoH 服务器（不参与默认解析）
+# ========== 3. DoH 服务器【字段为 ip】 ==========
 add_doh() {
     local name="$1" url="$2" group="$3"
     local sec=$(uci add smartdns server)
     uci set smartdns.$sec.enabled='1'
     uci set smartdns.$sec.name="$name"
-    uci set smartdns.$sec.ip="$url"
     uci set smartdns.$sec.type='https'
+    uci set smartdns.$sec.ip="$url"
     uci set smartdns.$sec.server_group="$group"
     uci set smartdns.$sec.exclude_default_group='1'
 }
-
+# 国内DoH（cn组，仅国内域名使用，不进默认组）
 add_doh 'ali-doh'        'https://dns.alidns.com/dns-query'       'cn'
 add_doh 'dnspod-doh'     'https://doh.pub/dns-query'              'cn'
+add_doh '360-doh'        'https://doh.360.cn/dns-query'           'cn'
+# 海外DoH（oversea组，仅海外域名使用）
 add_doh 'cloudflare-doh' 'https://cloudflare-dns.com/dns-query'   'oversea'
 add_doh 'google-doh'     'https://dns.google/dns-query'           'oversea'
 
-# 域名分流规则
-uci -q batch <<-EOT
-    set smartdns.cn_rule=domain-rule-list
-    set smartdns.cn_rule.enabled='1'
-    set smartdns.cn_rule.block_domain_type='none'
-    set smartdns.cn_rule.name='cn'
-    set smartdns.cn_rule.server_group='cn'
-    set smartdns.cn_rule.domain_list_file='/etc/smartdns/domain-set/cn.conf'
+# ========== 4. 域名列表骨架 ==========
+CN_LIST='/etc/smartdns/domain-set/cn.conf'
+OS_LIST='/etc/smartdns/domain-set/oversea.conf'
+[ -f "$CN_LIST" ] || cat > "$CN_LIST" << 'CNEOF'
+baidu.com
+qq.com
+taobao.com
+tmall.com
+jd.com
+bilibili.com
+zhihu.com
+weibo.com
+163.com
+126.com
+CNEOF
+[ -f "$OS_LIST" ] || cat > "$OS_LIST" << 'OSEOF'
+google.com
+youtube.com
+github.com
+cloudflare.com
+twitter.com
+facebook.com
+instagram.com
+wikipedia.org
+OSEOF
 
-    set smartdns.oversea_rule=domain-rule-list
-    set smartdns.oversea_rule.enabled='1'
-    set smartdns.oversea_rule.name='oversea'
-    set smartdns.oversea_rule.server_group='oversea'
-    set smartdns.oversea_rule.domain_list_file='/etc/smartdns/domain-set/oversea.conf'
-EOT
+# ========== 5. custom.conf 分流规则 + Bootstrap DNS ==========
+CUSTOM='/etc/smartdns/custom.conf'
+mkdir -p /etc/smartdns
+cat > "$CUSTOM" << 'CUSTOMEOF'
+# ===== domain-set 定义 =====
+domain-set -name cn -file /etc/smartdns/domain-set/cn.conf
+domain-set -name oversea -file /etc/smartdns/domain-set/oversea.conf
 
+# ===== 分流规则 =====
+# 国内域名走 cn 组（移动UDP + 国内DoH，自动测速择优）
+domain-rules /domain-set:cn/ -nameserver cn
+# 国外域名走 oversea 组，关闭测速，固定走海外DoH
+domain-rules /domain-set:oversea/ -nameserver oversea -speed-check-mode none
+
+# ===== Bootstrap DNS：启动时解析 DoH 域名 =====
+server 223.5.5.5 -bootstrap-dns
+CUSTOMEOF
+
+# ========== 6. 提交uci配置 ==========
 uci commit smartdns
 exit 0
 SMARTDNSEOF
 chmod +x "$UCI_DIR/94-smartdns"
-
-# ---------- 自动更新脚本 ----------
-mkdir -p "./package/base-files/files/usr/bin"
-cat > "./package/base-files/files/usr/bin/update-smartdns-rules.sh" << 'UPEOF'
-#!/bin/sh
-# 下载并转换国内域名列表
-curl -sL "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/direct-list.txt" \
-| sed 's/^full://g; s/^domain://g; /^regexp:/d; /^$/d' \
-| sort -u > /etc/smartdns/domain-set/cn.conf
-
-# 下载 anti-AD 去广告列表
-curl -sL "https://anti-ad.net/anti-ad-for-smartdns.conf" \
--o /etc/smartdns/domain-set/anti-ad-smartdns.conf
-
-# 重启 SmartDNS
-/etc/init.d/smartdns restart
-UPEOF
-chmod +x "./package/base-files/files/usr/bin/update-smartdns-rules.sh"
-
-# ---------- 规则文件（编译时预置空文件）----------
-mkdir -p "./package/base-files/files/etc/smartdns/domain-set"
-touch "./package/base-files/files/etc/smartdns/domain-set/cn.conf"
-touch "./package/base-files/files/etc/smartdns/domain-set/oversea.conf"
-touch "./package/base-files/files/etc/smartdns/domain-set/anti-ad-smartdns.conf"
-
-# ---------- custom.conf (改为 uci-defaults 动态生成) ----------
-cat > "$UCI_DIR/95-smartdns-custom" << 'CUSTOMEOF'
-#!/bin/sh
-cat > /etc/smartdns/custom.conf << 'EOF'
-# Add custom settings here.
-# please read https://pymumu.github.io/smartdns/config/basic-config/
-
-# anti-AD 去广告规则
-conf-file /etc/smartdns/domain-set/anti-ad-smartdns.conf
-EOF
-exit 0
-CUSTOMEOF
-chmod +x "$UCI_DIR/95-smartdns-custom"
-
-# ---------- 定时任务 ----------
-mkdir -p "./package/base-files/files/etc/crontabs"
-cat > "./package/base-files/files/etc/crontabs/root" << 'CRONEOF'
-0 2 * * * /usr/bin/update-smartdns-rules.sh
-CRONEOF
-
 green "✅ uci-defaults 完成"
-green "✅ smartdns 配置已注入 uci-defaults"
 
 # ==================== NSS PBUF 动态策略 ====================
 update_nss_pbuf_performance() {

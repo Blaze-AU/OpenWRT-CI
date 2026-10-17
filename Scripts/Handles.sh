@@ -20,7 +20,7 @@ fi
 if [ -d "$PACKAGE_PATH/luci-app-aurora-config" ]; then
 	echo " "
 	if find "$PACKAGE_PATH/luci-app-aurora-config/root/usr/share/aurora/" -type f -name '*.template' -exec \
-		sed -i "s/nav_type '.*'/nav_type 'dropdown'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" {} +; then
+		sed -i "s/nav_type '.*'/nav_type 'dropdown'/g; s/struct_radius_base '.*'/struct_radius_base '0.325rem'/g" {} +; then
 		echo "theme-aurora has been fixed!"
 	else
 		echo "theme-aurora fix failed; continuing!"
@@ -59,3 +59,5 @@ if [ -d "$FEEDS_PATH/packages/lang/rust" ]; then
 		echo "rust fix failed; continuing!"
 	fi
 fi
+./scripts/feeds update -a
+./scripts/feeds install -a

@@ -66,7 +66,7 @@ UPDATE_PACKAGE "shadcn"        "eamonxg/luci-theme-shadcn"      "main"
 # ============================================================
 UPDATE_PACKAGE "luci-app-rtp2httpd"   "stackia/rtp2httpd"                   "main"   ""    "rtp2httpd"
 UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev"    ""
-UPDATE_PACKAGE "luci-app-smartdns"    "pymumu/luci-app-smartdns"            "master"
+UPDATE_PACKAGE "luci-app-smartdns"    "PikuZheng/smartdns"            "master"
 UPDATE_PACKAGE "luci-app-upnp"        "immortalwrt/luci"                    "master"
 
 # 删除 adg 核心缓存

@@ -69,8 +69,7 @@ UPDATE_PACKAGE "luci-app-adguardhome" "stevenjoezhang/luci-app-adguardhome" "dev
 UPDATE_PACKAGE "luci-app-smartdns"    "pymumu/luci-app-smartdns"            "master"
 UPDATE_PACKAGE "luci-app-upnp"        "immortalwrt/luci"                    "master"
 
-# 删除 adg 核心缓存
-DELETE_ADG_CORE
+
 
 # ============================================================
 # 更新软件包版本

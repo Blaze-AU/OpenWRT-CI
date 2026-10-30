@@ -67,6 +67,9 @@ CONFIG_PACKAGE_luci-app-smartdns=y
 # AdGuardHome
 #CONFIG_PACKAGE_luci-app-adguardhome=y
 
+#app监控
+CONFIG_PACKAGE_luci-app-routelink=y
+
 #组播转单播（IPTV）
 CONFIG_PACKAGE_luci-app-rtp2httpd=y
 

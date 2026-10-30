@@ -63,7 +63,7 @@ UPDATE_PACKAGE "luci-app-smartdns"    "pymumu/luci-app-smartdns"            "mas
 UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac miniupnpd luci-app-timewol luci-app-upnp luci-app-wolplus luci-app-wolultra"
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
-
+UPDATE_PACKAGE "routelinkd" "tsix2019/RouteLink" "main" "" "luci-app-routelink luci-i18n-routelink-zh-cn"
 UPDATE_PACKAGE "netspeedtest" "sirpdboy/netspeedtest" "main" "" "homebox ookla-speedtest"
 UPDATE_PACKAGE "netwizard" "sirpdboy/luci-app-netwizard" "main"
 UPDATE_PACKAGE "partexp" "sirpdboy/luci-app-partexp" "main"

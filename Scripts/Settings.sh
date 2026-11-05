@@ -6,6 +6,7 @@ sq_escape() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
 
 UCI_DIR="./package/base-files/files/etc/uci-defaults"
 BUILD_DIR="${BUILD_DIR:-$GITHUB_WORKSPACE}"
+CONFIG_FILE="${CONFIG_FILE:-./.config}"
 
 # ==================== 主题/系统预设 ====================
 # 移除 luci-app-attendedsysupgrade
@@ -49,6 +50,51 @@ if [ -n "$WRT_PACKAGE" ]; then
     printf '%s\n' "$WRT_PACKAGE" | while IFS= read -r line; do
         [ -n "$line" ] && echo "$line" >> "$CONFIG_FILE"
     done
+fi
+
+# ==================== 禁用 USB 相关（AX5 无 USB 口） ====================
+green "=== 禁用 USB 相关插件 ==="
+
+USB_DISABLE_LIST=(
+    "CONFIG_PACKAGE_kmod-usb-common"
+    "CONFIG_PACKAGE_kmod-usb-core"
+    "CONFIG_PACKAGE_kmod-usb-storage"
+    "CONFIG_PACKAGE_kmod-usb-storage-extras"
+    "CONFIG_PACKAGE_kmod-usb-storage-uas"
+    "CONFIG_PACKAGE_kmod-usb-xhci-hcd"
+    "CONFIG_PACKAGE_kmod-usb-dwc3"
+    "CONFIG_PACKAGE_kmod-usb-dwc3-qcom"
+    "CONFIG_PACKAGE_kmod-usb-roles"
+    "CONFIG_PACKAGE_kmod-usb3"
+    "CONFIG_PACKAGE_kmod-fs-exfat"
+    "CONFIG_PACKAGE_kmod-fs-ntfs3"
+    "CONFIG_PACKAGE_kmod-fs-vfat"
+    "CONFIG_PACKAGE_ntfs3-mount"
+)
+for item in "${USB_DISABLE_LIST[@]}"; do
+    sed -i "/^${item}=/d" "$CONFIG_FILE"
+    echo "# ${item} is not set" >> "$CONFIG_FILE"
+done
+green "✅ 已在 .config 中禁用 USB 相关包"
+
+# ==================== F2FS 支持开关（AX5 无 USB，按需） ====================
+ENABLE_F2FS="${ENABLE_F2FS:-0}"   # 默认 0：不编译 F2FS；设为 1 则保留
+
+if [ "$ENABLE_F2FS" = "0" ]; then
+    F2FS_DISABLE_LIST=(
+        "CONFIG_PACKAGE_kmod-fs-f2fs"
+        "CONFIG_PACKAGE_f2fs-tools"
+        "CONFIG_PACKAGE_f2fsck"
+        "CONFIG_PACKAGE_mkf2fs"
+        "CONFIG_PACKAGE_libf2fs6"
+    )
+    for item in "${F2FS_DISABLE_LIST[@]}"; do
+        sed -i "/^${item}=/d" "$CONFIG_FILE"
+        echo "# ${item} is not set" >> "$CONFIG_FILE"
+    done
+    green "✅ F2FS 相关已禁用（ENABLE_F2FS=0）"
+else
+    green "ℹ️ F2FS 保留（ENABLE_F2FS=1），请确认 AX5 有 SD 卡槽或外接存储需求"
 fi
 
 # ==================== uci-defaults 预设 ====================
@@ -221,6 +267,26 @@ SMARTDNSEOF
 chmod +x "$UCI_DIR/94-smartdns"
 green "✅ uci-defaults 完成"
 
+# ==================== 运行时 USB 屏蔽（精确匹配） ====================
+cat > "$UCI_DIR/95-disable-usb" << 'USBEOF'
+#!/bin/sh
+# 精确匹配模块名，避免误删 usbip/usbmon 等无关行
+for mod in usb-storage uas xhci-hcd xhci-plat-hcd dwc3 dwc3-qcom usb-common usbcore; do
+    for f in /etc/modules.d/*; do
+        [ -f "$f" ] || continue
+        sed -i -r "/^[[:space:]]*${mod}([[:space:]]|$)/d" "$f"
+    done
+done
+# 停止并禁用可能存在的 USB 相关服务
+for svc in usbmode usb; do
+    [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc stop 2>/dev/null
+    [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc disable 2>/dev/null
+done
+exit 0
+USBEOF
+chmod +x "$UCI_DIR/95-disable-usb"
+green "✅ 已添加运行时 USB 屏蔽脚本（精确匹配版）"
+
 # ==================== NSS PBUF 动态策略 ====================
 update_nss_pbuf_performance() {
     local conf="./package/kernel/mac80211/files/pbuf.uci"
@@ -248,3 +314,7 @@ if [[ "${WRT_TARGET^^}" == *"QUALCOMMAX"* ]]; then
         echo "qualcommax set up nowifi successfully!"
     fi
 fi
+
+# ==================== 编译后检查提示 ====================
+green "=== 编译前建议执行 make defconfig 后检查 ==="
+green "grep -E '^CONFIG_PACKAGE_(kmod-usb|kmod-fs-f2fs|f2fs-tools|f2fsck|mkf2fs)' .config"

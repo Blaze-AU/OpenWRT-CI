@@ -52,9 +52,20 @@ if [ -n "$WRT_PACKAGE" ]; then
     done
 fi
 
-# ==================== 禁用 USB 相关（AX5 无 USB 口） ====================
-green "=== 禁用 USB 相关插件 ==="
+# ==================== IFB 禁用（无流量整形/多拨需求） ====================
+green "=== 禁用 IFB 相关 ==="
+IFB_DISABLE_LIST=(
+    "CONFIG_PACKAGE_kmod-ifb"
+    "CONFIG_PACKAGE_kmod-nss-ifb"
+)
+for item in "${IFB_DISABLE_LIST[@]}"; do
+    sed -i "/^${item}=/d" "$CONFIG_FILE"
+    echo "# ${item} is not set" >> "$CONFIG_FILE"
+done
+green "✅ IFB 相关已禁用"
 
+# ==================== USB 禁用（AX5 无 USB 口） ====================
+green "=== 禁用 USB 相关插件 ==="
 USB_DISABLE_LIST=(
     "CONFIG_PACKAGE_kmod-usb-common"
     "CONFIG_PACKAGE_kmod-usb-core"
@@ -66,36 +77,33 @@ USB_DISABLE_LIST=(
     "CONFIG_PACKAGE_kmod-usb-dwc3-qcom"
     "CONFIG_PACKAGE_kmod-usb-roles"
     "CONFIG_PACKAGE_kmod-usb3"
-    "CONFIG_PACKAGE_kmod-fs-exfat"
-    "CONFIG_PACKAGE_kmod-fs-ntfs3"
-    "CONFIG_PACKAGE_kmod-fs-vfat"
-    "CONFIG_PACKAGE_ntfs3-mount"
+    "CONFIG_PACKAGE_kmod-scsi-core"
 )
 for item in "${USB_DISABLE_LIST[@]}"; do
     sed -i "/^${item}=/d" "$CONFIG_FILE"
     echo "# ${item} is not set" >> "$CONFIG_FILE"
 done
-green "✅ 已在 .config 中禁用 USB 相关包"
+green "✅ USB 相关已禁用（含 scsi-core）"
 
-# ==================== F2FS 支持开关（AX5 无 USB，按需） ====================
-ENABLE_F2FS="${ENABLE_F2FS:-0}"   # 默认 0：不编译 F2FS；设为 1 则保留
-
-if [ "$ENABLE_F2FS" = "0" ]; then
-    F2FS_DISABLE_LIST=(
-        "CONFIG_PACKAGE_kmod-fs-f2fs"
-        "CONFIG_PACKAGE_f2fs-tools"
-        "CONFIG_PACKAGE_f2fsck"
-        "CONFIG_PACKAGE_mkf2fs"
-        "CONFIG_PACKAGE_libf2fs6"
-    )
-    for item in "${F2FS_DISABLE_LIST[@]}"; do
-        sed -i "/^${item}=/d" "$CONFIG_FILE"
-        echo "# ${item} is not set" >> "$CONFIG_FILE"
-    done
-    green "✅ F2FS 相关已禁用（ENABLE_F2FS=0）"
-else
-    green "ℹ️ F2FS 保留（ENABLE_F2FS=1），请确认 AX5 有 SD 卡槽或外接存储需求"
-fi
+# ==================== 外接存储文件系统禁用 ====================
+green "=== 禁用外接存储文件系统 ==="
+STORAGE_DISABLE_LIST=(
+    "CONFIG_PACKAGE_kmod-fs-exfat"
+    "CONFIG_PACKAGE_kmod-fs-ntfs3"
+    "CONFIG_PACKAGE_kmod-fs-vfat"
+    "CONFIG_PACKAGE_ntfs3-mount"
+    "CONFIG_PACKAGE_kmod-fs-ext4"
+    "CONFIG_PACKAGE_kmod-fs-f2fs"
+    "CONFIG_PACKAGE_f2fs-tools"
+    "CONFIG_PACKAGE_f2fsck"
+    "CONFIG_PACKAGE_mkf2fs"
+    "CONFIG_PACKAGE_libf2fs6"
+)
+for item in "${STORAGE_DISABLE_LIST[@]}"; do
+    sed -i "/^${item}=/d" "$CONFIG_FILE"
+    echo "# ${item} is not set" >> "$CONFIG_FILE"
+done
+green "✅ 外接存储文件系统已禁用"
 
 # ==================== uci-defaults 预设 ====================
 green "=== 3. uci-defaults 预设 ==="
@@ -267,11 +275,12 @@ SMARTDNSEOF
 chmod +x "$UCI_DIR/94-smartdns"
 green "✅ uci-defaults 完成"
 
-# ==================== 运行时 USB 屏蔽（精确匹配） ====================
-cat > "$UCI_DIR/95-disable-usb" << 'USBEOF'
+# ==================== 运行时 USB/存储/IFB 屏蔽（精确匹配） ====================
+cat > "$UCI_DIR/95-disable-usb-storage-ifb" << 'USBEOF'
 #!/bin/sh
-# 精确匹配模块名，避免误删 usbip/usbmon 等无关行
-for mod in usb-storage uas xhci-hcd xhci-plat-hcd dwc3 dwc3-qcom usb-common usbcore; do
+# 精确屏蔽 USB/SCSI/外接存储/IFB 模块，避免误删 usbip/usbmon
+for mod in usb-storage uas xhci-hcd xhci-plat-hcd dwc3 dwc3-qcom usb-common usbcore \
+           scsi_mod sd_mod exfat ntfs3 vfat f2fs ifb nss-ifb; do
     for f in /etc/modules.d/*; do
         [ -f "$f" ] || continue
         sed -i -r "/^[[:space:]]*${mod}([[:space:]]|$)/d" "$f"
@@ -284,8 +293,8 @@ for svc in usbmode usb; do
 done
 exit 0
 USBEOF
-chmod +x "$UCI_DIR/95-disable-usb"
-green "✅ 已添加运行时 USB 屏蔽脚本（精确匹配版）"
+chmod +x "$UCI_DIR/95-disable-usb-storage-ifb"
+green "✅ 已添加运行时 USB/存储/IFB 屏蔽脚本"
 
 # ==================== NSS PBUF 动态策略 ====================
 update_nss_pbuf_performance() {
@@ -317,4 +326,4 @@ fi
 
 # ==================== 编译后检查提示 ====================
 green "=== 编译前建议执行 make defconfig 后检查 ==="
-green "grep -E '^CONFIG_PACKAGE_(kmod-usb|kmod-fs-f2fs|f2fs-tools|f2fsck|mkf2fs)' .config"
+green "grep -E '^CONFIG_PACKAGE_(kmod-ifb|kmod-nss-ifb|kmod-usb|kmod-scsi-core|kmod-fs-(exfat|ntfs3|vfat|ext4|f2fs)|ntfs3-mount|f2fs)' .config"

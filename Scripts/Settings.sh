@@ -52,17 +52,33 @@ if [ -n "$WRT_PACKAGE" ]; then
     done
 fi
 
-# ==================== IFB 禁用（无流量整形/多拨需求） ====================
-green "=== 禁用 IFB 相关 ==="
-IFB_DISABLE_LIST=(
+# ==================== IFB / SQM 禁用（完全不用流量整形） ====================
+green "=== 禁用 IFB 与 SQM 相关 ==="
+IFB_SQM_DISABLE_LIST=(
     "CONFIG_PACKAGE_kmod-ifb"
     "CONFIG_PACKAGE_kmod-nss-ifb"
+    "CONFIG_PACKAGE_sqm-scripts"
+    "CONFIG_PACKAGE_sqm-scripts-nss"
+    "CONFIG_PACKAGE_luci-app-sqm"
+    "CONFIG_PACKAGE_luci-i18n-sqm-zh-cn"
 )
-for item in "${IFB_DISABLE_LIST[@]}"; do
+for item in "${IFB_SQM_DISABLE_LIST[@]}"; do
     sed -i "/^${item}=/d" "$CONFIG_FILE"
     echo "# ${item} is not set" >> "$CONFIG_FILE"
 done
-green "✅ IFB 相关已禁用"
+green "✅ IFB 与 SQM 相关已禁用"
+
+# ==================== 调度模块禁用（不用流量整形） ====================
+green "=== 禁用调度模块（保守：保留 kmod-sched-core） ==="
+SCHED_DISABLE_LIST=(
+    "CONFIG_PACKAGE_kmod-sched"
+    "CONFIG_PACKAGE_kmod-sched-flower"
+)
+for item in "${SCHED_DISABLE_LIST[@]}"; do
+    sed -i "/^${item}=/d" "$CONFIG_FILE"
+    echo "# ${item} is not set" >> "$CONFIG_FILE"
+done
+green "✅ kmod-sched / kmod-sched-flower 已禁用（kmod-sched-core 保留）"
 
 # ==================== USB 禁用（AX5 无 USB 口） ====================
 green "=== 禁用 USB 相关插件 ==="
@@ -275,26 +291,26 @@ SMARTDNSEOF
 chmod +x "$UCI_DIR/94-smartdns"
 green "✅ uci-defaults 完成"
 
-# ==================== 运行时 USB/存储/IFB 屏蔽（精确匹配） ====================
+# ==================== 运行时 USB/存储/IFB/SQM 屏蔽（精确匹配） ====================
 cat > "$UCI_DIR/95-disable-usb-storage-ifb" << 'USBEOF'
 #!/bin/sh
-# 精确屏蔽 USB/SCSI/外接存储/IFB 模块，避免误删 usbip/usbmon
+# 精确屏蔽 USB/SCSI/外接存储/IFB/SQM 调度模块，避免误删 usbip/usbmon
 for mod in usb-storage uas xhci-hcd xhci-plat-hcd dwc3 dwc3-qcom usb-common usbcore \
-           scsi_mod sd_mod exfat ntfs3 vfat f2fs ifb nss-ifb; do
+           scsi_mod sd_mod exfat ntfs3 vfat f2fs ifb nss-ifb sch_htb sch_cake sch_fq_codel; do
     for f in /etc/modules.d/*; do
         [ -f "$f" ] || continue
         sed -i -r "/^[[:space:]]*${mod}([[:space:]]|$)/d" "$f"
     done
 done
-# 停止并禁用可能存在的 USB 相关服务
-for svc in usbmode usb; do
+# 停止并禁用可能存在的 USB / SQM 相关服务
+for svc in usbmode usb sqm; do
     [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc stop 2>/dev/null
     [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc disable 2>/dev/null
 done
 exit 0
 USBEOF
 chmod +x "$UCI_DIR/95-disable-usb-storage-ifb"
-green "✅ 已添加运行时 USB/存储/IFB 屏蔽脚本"
+green "✅ 已添加运行时 USB/存储/IFB/SQM 屏蔽脚本"
 
 # ==================== NSS PBUF 动态策略 ====================
 update_nss_pbuf_performance() {
@@ -326,4 +342,4 @@ fi
 
 # ==================== 编译后检查提示 ====================
 green "=== 编译前建议执行 make defconfig 后检查 ==="
-green "grep -E '^CONFIG_PACKAGE_(kmod-ifb|kmod-nss-ifb|kmod-usb|kmod-scsi-core|kmod-fs-(exfat|ntfs3|vfat|ext4|f2fs)|ntfs3-mount|f2fs)' .config"
+green "grep -E '^CONFIG_PACKAGE_(kmod-ifb|kmod-nss-ifb|sqm|luci-app-sqm|kmod-sched|kmod-usb|kmod-scsi-core|kmod-fs-(exfat|ntfs3|vfat|ext4|f2fs)|ntfs3-mount|f2fs)' .config"

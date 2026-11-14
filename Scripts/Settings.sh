@@ -61,6 +61,9 @@ IFB_SQM_DISABLE_LIST=(
     "CONFIG_PACKAGE_sqm-scripts-nss"
     "CONFIG_PACKAGE_luci-app-sqm"
     "CONFIG_PACKAGE_luci-i18n-sqm-zh-cn"
+    # 补充依赖源，防止被 defconfig 拉回
+    "CONFIG_PACKAGE_kmod-qca-nss-drv-qdisc"
+    "CONFIG_PACKAGE_kmod-qca-nss-drv-igs"
 )
 for item in "${IFB_SQM_DISABLE_LIST[@]}"; do
     sed -i "/^${item}=/d" "$CONFIG_FILE"
@@ -163,7 +166,7 @@ exit 0
 WIFIEOF
 chmod +x "$UCI_DIR/93-wifi-config"
 
-# ---------- SmartDNS 移动宽带专用（最终版） ----------
+# ---------- SmartDNS 移动宽带专用（优化游戏/视频防卡顿，全局关测速） ----------
 cat > "$UCI_DIR/94-smartdns" << 'SMARTDNSEOF'
 #!/bin/sh
 [ -f /etc/config/smartdns ] || touch /etc/config/smartdns
@@ -187,9 +190,6 @@ uci -q batch <<-EOT
     set smartdns.@smartdns[0].resolve_local_hostnames='1'
     set smartdns.@smartdns[0].force_https_soa='1'
     set smartdns.@smartdns[0].rr_ttl_min='600'
-    # 不需要第二DNS，注释关闭
-    # set smartdns.@smartdns[0].seconddns_port='6553'
-    # set smartdns.@smartdns[0].seconddns_tcp_server='1'
     set smartdns.@smartdns[0].log_output_mode='file'
     set smartdns.@smartdns[0].prefetch_domain='1'
     set smartdns.@smartdns[0].cache_size='32768'
@@ -221,7 +221,7 @@ add_server 'ali'     '223.5.5.5'       'cn' ''
 add_server 'dnspod'  '119.29.29.29'    'cn' ''
 add_server 'baidu'   '180.76.76.76'    'cn' ''
 
-# ========== 3. DoH 服务器【字段为 ip】 ==========
+# ========== 3. DoH 服务器 ==========
 add_doh() {
     local name="$1" url="$2" group="$3"
     local sec=$(uci add smartdns server)
@@ -232,17 +232,20 @@ add_doh() {
     uci set smartdns.$sec.server_group="$group"
     uci set smartdns.$sec.exclude_default_group='1'
 }
-# 国内DoH（cn组，仅国内域名使用，不进默认组）
+# 国内DoH
 add_doh 'ali-doh'        'https://dns.alidns.com/dns-query'       'cn'
 add_doh 'dnspod-doh'     'https://doh.pub/dns-query'              'cn'
 add_doh '360-doh'        'https://doh.360.cn/dns-query'           'cn'
-# 海外DoH（oversea组，仅海外域名使用）
+# 海外DoH
 add_doh 'cloudflare-doh' 'https://cloudflare-dns.com/dns-query'   'oversea'
 add_doh 'google-doh'     'https://dns.google/dns-query'           'oversea'
 
 # ========== 4. 域名列表骨架 ==========
 CN_LIST='/etc/smartdns/domain-set/cn.conf'
 OS_LIST='/etc/smartdns/domain-set/oversea.conf'
+GAME_LIST='/etc/smartdns/domain-set/game.conf'
+VIDEO_LIST='/etc/smartdns/domain-set/video.conf'
+
 [ -f "$CN_LIST" ] || cat > "$CN_LIST" << 'CNEOF'
 baidu.com
 qq.com
@@ -255,6 +258,7 @@ weibo.com
 163.com
 126.com
 CNEOF
+
 [ -f "$OS_LIST" ] || cat > "$OS_LIST" << 'OSEOF'
 google.com
 youtube.com
@@ -266,21 +270,58 @@ instagram.com
 wikipedia.org
 OSEOF
 
-# ========== 5. custom.conf 分流规则 + Bootstrap DNS ==========
+# 游戏专用
+[ -f "$GAME_LIST" ] || cat > "$GAME_LIST" << 'GAMEEOF'
+qq.com
+tencent.com
+tencent-cloud.com
+qcloud.com
+dnspod.cn
+GAMEEOF
+
+# 短视频/资讯专用（抖音、视频号、西瓜、头条）
+[ -f "$VIDEO_LIST" ] || cat > "$VIDEO_LIST" << 'VIDEOEOF'
+douyin.com
+douyinvod.com
+douyincdn.com
+bytedance.com
+byteimg.com
+pstatp.com
+snssdk.com
+toutiao.com
+ixigua.com
+weixin.com
+weixin.qq.com
+qpic.cn
+qlogo.cn
+wxqcloud.qq.com
+findermp.video.qq.com
+VIDEOEOF
+
+# ========== 5. custom.conf 分流规则 ==========
 CUSTOM='/etc/smartdns/custom.conf'
 mkdir -p /etc/smartdns
 cat > "$CUSTOM" << 'CUSTOMEOF'
 # ===== domain-set 定义 =====
 domain-set -name cn -file /etc/smartdns/domain-set/cn.conf
 domain-set -name oversea -file /etc/smartdns/domain-set/oversea.conf
+domain-set -name game -file /etc/smartdns/domain-set/game.conf
+domain-set -name video -file /etc/smartdns/domain-set/video.conf
 
 # ===== 分流规则 =====
-# 国内域名走 cn 组（移动UDP + 国内DoH，自动测速择优）
-domain-rules /domain-set:cn/ -nameserver cn
-# 国外域名走 oversea 组，关闭测速，固定走海外DoH
+# 【关键修复1】游戏/腾讯域名：强制走cn组，关闭测速
+domain-rules /domain-set:game/ -nameserver cn -speed-check-mode none
+
+# 【关键修复2】短视频/流媒体：强制走cn组，关闭测速
+domain-rules /domain-set:video/ -nameserver cn -speed-check-mode none
+
+# 【核心调整】国内域名走 cn 组：全局关闭测速，直接取最优解析结果
+domain-rules /domain-set:cn/ -nameserver cn -speed-check-mode none
+
+# 国外域名走 oversea 组，关闭测速
 domain-rules /domain-set:oversea/ -nameserver oversea -speed-check-mode none
 
-# ===== Bootstrap DNS：启动时解析 DoH 域名 =====
+# ===== Bootstrap DNS =====
 server 223.5.5.5 -bootstrap-dns
 CUSTOMEOF
 

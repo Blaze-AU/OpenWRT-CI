@@ -9,11 +9,8 @@ BUILD_DIR="${BUILD_DIR:-$GITHUB_WORKSPACE}"
 CONFIG_FILE="${CONFIG_FILE:-./.config}"
 
 # ==================== 主题/系统预设 ====================
-# 移除 luci-app-attendedsysupgrade
 sed -i "/attendedsysupgrade/d" $(find ./feeds/luci/collections/ -type f -name "Makefile")
-# 修改默认主题
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
-# 修改 immortalwrt.lan 关联 IP
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js")
 
 # ==================== WiFi 名称/密码 ====================
@@ -38,9 +35,8 @@ echo "CONFIG_LUCI_LANG_zh_Hans=y" >> ./.config
 echo "CONFIG_PACKAGE_luci-theme-$WRT_THEME=y" >> ./.config
 echo "CONFIG_PACKAGE_luci-app-$WRT_THEME-config=y" >> ./.config
 
-
-# ===================== 3. 私有配置 =====================
-green "=== 3. 加载自定义配置 ==="
+# ===================== 加载私有配置 =====================
+green "=== 加载自定义配置 ==="
 if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -f "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" ]; then
     green "📂 加载私有配置"
     cat "${GITHUB_WORKSPACE}/Config/PRIVATE.txt" >> "$CONFIG_FILE"
@@ -52,40 +48,22 @@ if [ -n "$WRT_PACKAGE" ]; then
     done
 fi
 
-# ==================== IFB / SQM 禁用（完全不用流量整形） ====================
-green "=== 禁用 IFB 与 SQM 相关 ==="
-IFB_SQM_DISABLE_LIST=(
+# ==================== 彻底精简（禁用全家桶） ====================
+green "=== 执行深度精简 ==="
+DISABLE_LIST=(
+    # IFB / SQM
     "CONFIG_PACKAGE_kmod-ifb"
     "CONFIG_PACKAGE_kmod-nss-ifb"
     "CONFIG_PACKAGE_sqm-scripts"
     "CONFIG_PACKAGE_sqm-scripts-nss"
     "CONFIG_PACKAGE_luci-app-sqm"
     "CONFIG_PACKAGE_luci-i18n-sqm-zh-cn"
-    # 补充依赖源，防止被 defconfig 拉回
     "CONFIG_PACKAGE_kmod-qca-nss-drv-qdisc"
     "CONFIG_PACKAGE_kmod-qca-nss-drv-igs"
-)
-for item in "${IFB_SQM_DISABLE_LIST[@]}"; do
-    sed -i "/^${item}=/d" "$CONFIG_FILE"
-    echo "# ${item} is not set" >> "$CONFIG_FILE"
-done
-green "✅ IFB 与 SQM 相关已禁用"
-
-# ==================== 调度模块禁用（不用流量整形） ====================
-green "=== 禁用调度模块（保守：保留 kmod-sched-core） ==="
-SCHED_DISABLE_LIST=(
+    # 调度模块
     "CONFIG_PACKAGE_kmod-sched"
     "CONFIG_PACKAGE_kmod-sched-flower"
-)
-for item in "${SCHED_DISABLE_LIST[@]}"; do
-    sed -i "/^${item}=/d" "$CONFIG_FILE"
-    echo "# ${item} is not set" >> "$CONFIG_FILE"
-done
-green "✅ kmod-sched / kmod-sched-flower 已禁用（kmod-sched-core 保留）"
-
-# ==================== USB 禁用（AX5 无 USB 口） ====================
-green "=== 禁用 USB 相关插件 ==="
-USB_DISABLE_LIST=(
+    # USB
     "CONFIG_PACKAGE_kmod-usb-common"
     "CONFIG_PACKAGE_kmod-usb-core"
     "CONFIG_PACKAGE_kmod-usb-storage"
@@ -97,16 +75,7 @@ USB_DISABLE_LIST=(
     "CONFIG_PACKAGE_kmod-usb-roles"
     "CONFIG_PACKAGE_kmod-usb3"
     "CONFIG_PACKAGE_kmod-scsi-core"
-)
-for item in "${USB_DISABLE_LIST[@]}"; do
-    sed -i "/^${item}=/d" "$CONFIG_FILE"
-    echo "# ${item} is not set" >> "$CONFIG_FILE"
-done
-green "✅ USB 相关已禁用（含 scsi-core）"
-
-# ==================== 外接存储文件系统禁用 ====================
-green "=== 禁用外接存储文件系统 ==="
-STORAGE_DISABLE_LIST=(
+    # 存储
     "CONFIG_PACKAGE_kmod-fs-exfat"
     "CONFIG_PACKAGE_kmod-fs-ntfs3"
     "CONFIG_PACKAGE_kmod-fs-vfat"
@@ -118,14 +87,14 @@ STORAGE_DISABLE_LIST=(
     "CONFIG_PACKAGE_mkf2fs"
     "CONFIG_PACKAGE_libf2fs6"
 )
-for item in "${STORAGE_DISABLE_LIST[@]}"; do
+for item in "${DISABLE_LIST[@]}"; do
     sed -i "/^${item}=/d" "$CONFIG_FILE"
     echo "# ${item} is not set" >> "$CONFIG_FILE"
 done
-green "✅ 外接存储文件系统已禁用"
+green "✅ 精简完成"
 
 # ==================== uci-defaults 预设 ====================
-green "=== 3. uci-defaults 预设 ==="
+green "=== 生成 uci-defaults 预设 ==="
 mkdir -p "$UCI_DIR"
 
 # ---------- NTP ----------
@@ -147,62 +116,49 @@ SAFE_WORD="$(sq_escape "$WRT_WORD")"
 cat > "$UCI_DIR/93-wifi-config" << WIFIEOF
 #!/bin/sh
 [ -e /etc/config/wireless ] || wifi config
-
 for dev in \$(uci show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-device\$/\1/p'); do
     uci set wireless.\$dev.disabled='0'
     uci set wireless.\$dev.country='CN'
     uci set wireless.\$dev.log_level='1'
 done
-
 for iface in \$(uci show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface\$/\1/p'); do
     uci set wireless.\$iface.ssid='${SAFE_SSID}'
     uci set wireless.\$iface.key='${SAFE_WORD}'
     uci set wireless.\$iface.encryption='psk2+ccmp'
     uci set wireless.\$iface.apsd='0'
 done
-
 uci commit wireless
 exit 0
 WIFIEOF
 chmod +x "$UCI_DIR/93-wifi-config"
 
-# ---------- SmartDNS 移动宽带专用（优化游戏/视频防卡顿，全局关测速） ----------
+# ---------- SmartDNS 全量覆盖 ----------
 cat > "$UCI_DIR/94-smartdns" << 'SMARTDNSEOF'
 #!/bin/sh
 [ -f /etc/config/smartdns ] || touch /etc/config/smartdns
-# 确保日志目录和域名列表目录存在
 mkdir -p /var/log/smartdns
 mkdir -p /etc/smartdns/domain-set
 
-# ========== 1. 主配置 ==========
+# 强制清理旧的 custom.conf，防止旧规则残留
+rm -f /etc/smartdns/custom.conf
+
 uci -q batch <<-EOT
     set smartdns.@smartdns[0].enabled='1'
     set smartdns.@smartdns[0].port='6053'
     set smartdns.@smartdns[0].auto_set_dnsmasq='1'
     set smartdns.@smartdns[0].tcp_server='1'
-    set smartdns.@smartdns[0].tls_server='0'
-    set smartdns.@smartdns[0].doh_server='0'
     set smartdns.@smartdns[0].ipv6_server='1'
     set smartdns.@smartdns[0].bind_device='1'
     set smartdns.@smartdns[0].dualstack_ip_selection='1'
     set smartdns.@smartdns[0].serve_expired='1'
     set smartdns.@smartdns[0].cache_persist='1'
     set smartdns.@smartdns[0].resolve_local_hostnames='1'
-    set smartdns.@smartdns[0].force_https_soa='1'
-    set smartdns.@smartdns[0].rr_ttl_min='600'
-    set smartdns.@smartdns[0].log_output_mode='file'
-    set smartdns.@smartdns[0].prefetch_domain='1'
     set smartdns.@smartdns[0].cache_size='32768'
     set smartdns.@smartdns[0].server_name='cn'
-    set smartdns.@smartdns[0].coredump='0'
-    set smartdns.@smartdns[0].log_level='info'
-    set smartdns.@smartdns[0].log_size='64k'
-    set smartdns.@smartdns[0].log_num='1'
+    set smartdns.@smartdns[0].log_output_mode='file'
     set smartdns.@smartdns[0].log_file='/var/log/smartdns/smartdns.log'
-    set smartdns.@smartdns[0].enable_auto_update='0'
 EOT
 
-# ========== 2. 国内 UDP 服务器 ==========
 add_server() {
     local name="$1" ip="$2" group="$3" exclude="$4"
     local sec=$(uci add smartdns server)
@@ -213,15 +169,11 @@ add_server() {
     uci set smartdns.$sec.server_group="$group"
     [ -n "$exclude" ] && uci set smartdns.$sec.exclude_default_group="$exclude"
 }
-# 移动运营商DNS（优先，移动宽带延迟最低）
 add_server 'cmcc'    '211.136.192.6'   'cn' ''
 add_server 'cmcc2'   '120.196.165.24'  'cn' ''
-# 国内公共DNS做备份
 add_server 'ali'     '223.5.5.5'       'cn' ''
 add_server 'dnspod'  '119.29.29.29'    'cn' ''
-add_server 'baidu'   '180.76.76.76'    'cn' ''
 
-# ========== 3. DoH 服务器 ==========
 add_doh() {
     local name="$1" url="$2" group="$3"
     local sec=$(uci add smartdns server)
@@ -232,21 +184,16 @@ add_doh() {
     uci set smartdns.$sec.server_group="$group"
     uci set smartdns.$sec.exclude_default_group='1'
 }
-# 国内DoH
 add_doh 'ali-doh'        'https://dns.alidns.com/dns-query'       'cn'
 add_doh 'dnspod-doh'     'https://doh.pub/dns-query'              'cn'
-add_doh '360-doh'        'https://doh.360.cn/dns-query'           'cn'
-# 海外DoH
 add_doh 'cloudflare-doh' 'https://cloudflare-dns.com/dns-query'   'oversea'
-add_doh 'google-doh'     'https://dns.google/dns-query'           'oversea'
 
-# ========== 4. 域名列表骨架 ==========
 CN_LIST='/etc/smartdns/domain-set/cn.conf'
 OS_LIST='/etc/smartdns/domain-set/oversea.conf'
 GAME_LIST='/etc/smartdns/domain-set/game.conf'
 VIDEO_LIST='/etc/smartdns/domain-set/video.conf'
 
-[ -f "$CN_LIST" ] || cat > "$CN_LIST" << 'CNEOF'
+cat > "$CN_LIST" << 'CNEOF'
 baidu.com
 qq.com
 taobao.com
@@ -255,23 +202,16 @@ jd.com
 bilibili.com
 zhihu.com
 weibo.com
-163.com
-126.com
 CNEOF
 
-[ -f "$OS_LIST" ] || cat > "$OS_LIST" << 'OSEOF'
+cat > "$OS_LIST" << 'OSEOF'
 google.com
 youtube.com
 github.com
-cloudflare.com
 twitter.com
-facebook.com
-instagram.com
-wikipedia.org
 OSEOF
 
-# 游戏专用
-[ -f "$GAME_LIST" ] || cat > "$GAME_LIST" << 'GAMEEOF'
+cat > "$GAME_LIST" << 'GAMEEOF'
 qq.com
 tencent.com
 tencent-cloud.com
@@ -279,8 +219,7 @@ qcloud.com
 dnspod.cn
 GAMEEOF
 
-# 短视频/资讯专用（抖音、视频号、西瓜、头条）
-[ -f "$VIDEO_LIST" ] || cat > "$VIDEO_LIST" << 'VIDEOEOF'
+cat > "$VIDEO_LIST" << 'VIDEOEOF'
 douyin.com
 douyinvod.com
 douyincdn.com
@@ -298,44 +237,33 @@ wxqcloud.qq.com
 findermp.video.qq.com
 VIDEOEOF
 
-# ========== 5. custom.conf 分流规则 ==========
 CUSTOM='/etc/smartdns/custom.conf'
-mkdir -p /etc/smartdns
 cat > "$CUSTOM" << 'CUSTOMEOF'
-# ===== domain-set 定义 =====
 domain-set -name cn -file /etc/smartdns/domain-set/cn.conf
 domain-set -name oversea -file /etc/smartdns/domain-set/oversea.conf
 domain-set -name game -file /etc/smartdns/domain-set/game.conf
 domain-set -name video -file /etc/smartdns/domain-set/video.conf
 
-# ===== 分流规则 =====
-# 【关键修复1】游戏/腾讯域名：强制走cn组，关闭测速
+# 游戏/腾讯：强制走cn组，关测速
 domain-rules /domain-set:game/ -nameserver cn -speed-check-mode none
-
-# 【关键修复2】短视频/流媒体：强制走cn组，关闭测速
+# 短视频/流媒体：强制走cn组，关测速
 domain-rules /domain-set:video/ -nameserver cn -speed-check-mode none
-
-# 【核心调整】国内域名走 cn 组：全局关闭测速，直接取最优解析结果
+# 国内域名：全局关闭测速
 domain-rules /domain-set:cn/ -nameserver cn -speed-check-mode none
-
-# 国外域名走 oversea 组，关闭测速
+# 国外域名：关测速
 domain-rules /domain-set:oversea/ -nameserver oversea -speed-check-mode none
 
-# ===== Bootstrap DNS =====
 server 223.5.5.5 -bootstrap-dns
 CUSTOMEOF
 
-# ========== 6. 提交uci配置 ==========
 uci commit smartdns
 exit 0
 SMARTDNSEOF
 chmod +x "$UCI_DIR/94-smartdns"
-green "✅ uci-defaults 完成"
 
-# ==================== 运行时 USB/存储/IFB/SQM 屏蔽（精确匹配） ====================
+# ---------- 运行时屏蔽 ----------
 cat > "$UCI_DIR/95-disable-usb-storage-ifb" << 'USBEOF'
 #!/bin/sh
-# 精确屏蔽 USB/SCSI/外接存储/IFB/SQM 调度模块，避免误删 usbip/usbmon
 for mod in usb-storage uas xhci-hcd xhci-plat-hcd dwc3 dwc3-qcom usb-common usbcore \
            scsi_mod sd_mod exfat ntfs3 vfat f2fs ifb nss-ifb sch_htb sch_cake sch_fq_codel; do
     for f in /etc/modules.d/*; do
@@ -343,7 +271,6 @@ for mod in usb-storage uas xhci-hcd xhci-plat-hcd dwc3 dwc3-qcom usb-common usbc
         sed -i -r "/^[[:space:]]*${mod}([[:space:]]|$)/d" "$f"
     done
 done
-# 停止并禁用可能存在的 USB / SQM 相关服务
 for svc in usbmode usb sqm; do
     [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc stop 2>/dev/null
     [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc disable 2>/dev/null
@@ -351,7 +278,6 @@ done
 exit 0
 USBEOF
 chmod +x "$UCI_DIR/95-disable-usb-storage-ifb"
-green "✅ 已添加运行时 USB/存储/IFB/SQM 屏蔽脚本"
 
 # ==================== NSS PBUF 动态策略 ====================
 update_nss_pbuf_performance() {
@@ -380,7 +306,3 @@ if [[ "${WRT_TARGET^^}" == *"QUALCOMMAX"* ]]; then
         echo "qualcommax set up nowifi successfully!"
     fi
 fi
-
-# ==================== 编译后检查提示 ====================
-green "=== 编译前建议执行 make defconfig 后检查 ==="
-green "grep -E '^CONFIG_PACKAGE_(kmod-ifb|kmod-nss-ifb|sqm|luci-app-sqm|kmod-sched|kmod-usb|kmod-scsi-core|kmod-fs-(exfat|ntfs3|vfat|ext4|f2fs)|ntfs3-mount|f2fs)' .config"

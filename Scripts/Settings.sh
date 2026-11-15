@@ -266,7 +266,8 @@ domain-rules /domain-set:video/ -nameserver cn
 domain-rules /domain-set:download/ -nameserver cn
 domain-rules /domain-set:daily/ -nameserver cn
 
-default-server cn
+# 兜底，所有其它请求走国内组
+nameserver /cn/
 CUSTOMEOF
 
 uci commit smartdns

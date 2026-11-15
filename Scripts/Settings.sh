@@ -132,7 +132,7 @@ exit 0
 WIFIEOF
 chmod +x "$UCI_DIR/93-wifi-config"
 
-# ---------- SmartDNS 全局禁测速四维分流 ----------
+# ---------- SmartDNS 全局禁测速四维分流（最终版） ----------
 cat > "$UCI_DIR/94-smartdns" << 'SMARTDNSEOF'
 #!/bin/sh
 [ -f /etc/config/smartdns ] || touch /etc/config/smartdns
@@ -170,6 +170,10 @@ add_server 'cmcc'    '211.136.192.6'   'isp'
 add_server 'cmcc2'   '120.196.165.24'  'isp'
 add_server 'ali'     '223.5.5.5'       'cn'
 add_server 'dnspod'  '119.29.29.29'    'cn'
+# 新增的百度与 360 DNS
+add_server 'baidu'   '180.76.76.76'    'cn'
+add_server '360-1'   '101.226.4.6'     'cn'
+add_server '360-2'   '218.30.118.6'    'cn'
 
 DAILY_LIST='/etc/smartdns/domain-set/daily.conf'
 GAME_LIST='/etc/smartdns/domain-set/game.conf'
@@ -260,8 +264,11 @@ domain-set -name video -file /etc/smartdns/domain-set/video.conf
 domain-set -name voice -file /etc/smartdns/domain-set/voice.conf
 domain-set -name download -file /etc/smartdns/domain-set/download.conf
 
-domain-rules /domain-set:game/ -nameserver isp
+# 游戏：移动主力 + 公共兜底
+domain-rules /domain-set:game/ -nameserver isp -nameserver cn
+# 语音：移动主力 + 公共兜底
 domain-rules /domain-set:voice/ -nameserver isp -nameserver cn
+# 视频、下载、日常：全走公共组
 domain-rules /domain-set:video/ -nameserver cn
 domain-rules /domain-set:download/ -nameserver cn
 domain-rules /domain-set:daily/ -nameserver cn
@@ -309,15 +316,12 @@ green "=== NSS PBUF 优化 ==="
 update_nss_pbuf_performance() {
     local conf="./package/kernel/mac80211/files/pbuf.uci"
     if [ -f "$conf" ]; then
-        # 读取物理内存（MemTotal 反映的是内核可用总量，512MB 机型通常显示 ~500MB）
         mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
         mem_mb=$((mem_total / 1024))
         if [ ${mem_mb} -le 400 ]; then
-            # 真正的小内存（256MB 机型）
             sed -i "s/auto_scale '1'/auto_scale 'off'/g" "$conf" 2>/dev/null
             green "✅ NSS PBUF: 内存 ${mem_mb}MB <= 400，auto_scale 关闭"
         else
-            # 512MB 及以上：保持 auto_scale 开启，让 NSS 动态管理 WiFi 缓冲区
             sed -i "s/auto_scale 'off'/auto_scale '1'/g" "$conf" 2>/dev/null
             green "✅ NSS PBUF: 内存 ${mem_mb}MB > 400，auto_scale 开启（WiFi 多设备优化）"
         fi
